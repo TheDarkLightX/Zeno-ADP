@@ -1,0 +1,15 @@
+[package]
+name = "zeno-adp"
+version = "0.1.0"
+edition = "2021"
+authors = ["Dana Edwards (TheDarkLightX)"]
+license = "MIT"
+description = "Algebraic dynamic programming over ranked tree grammars"
+
+[profile.dev]
+debug = 0
+incremental = false
+
+[profile.test]
+debug = 0
+incremental = false
