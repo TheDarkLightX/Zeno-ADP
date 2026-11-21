@@ -1,9 +1,12 @@
-use std::ops::Range;
+use std::ops::{Range, RangeInclusive};
 
 use crate::fast::RuleSource;
-use crate::{Cell, Error, Operator};
+use crate::{reserve_table, Cell, Error, Operator};
 
 use super::{sealed, ProductionSink, Program};
+
+// The sequence compiler admits contiguous one- and two-track grammars.
+const SUPPORTED_TRACKS: RangeInclusive<usize> = 1..=2;
 
 /// Index into a grammar's declared nonterminal names.
 pub type Nonterminal = usize;
@@ -17,21 +20,93 @@ pub enum Atom {
     Child(usize),
 }
 
-/// Coordinates of one production occurrence. Spans are half-open byte ranges.
-pub struct Matched<'a, const TRACKS: usize> {
-    pub inputs: [&'a [u8]; TRACKS],
+/// One symbol on a track of user-defined tokens.
+pub enum TokenAtom<T> {
+    /// Match one token by equality.
+    Equals(T),
+    /// Match one token if the deterministic predicate accepts it.
+    Predicate(Box<dyn Fn(&T) -> bool>),
+    /// Match any one token.
+    Any,
+    /// Index into this production's ordered children.
+    Child(usize),
+}
+
+#[doc(hidden)]
+pub trait TrackAtom<T>: sealed::Sealed {
+    fn child(&self) -> Option<usize>;
+    fn accepts(&self, token: &T) -> bool;
+}
+
+impl sealed::Sealed for Atom {}
+impl<T> sealed::Sealed for TokenAtom<T> {}
+
+impl TrackAtom<u8> for Atom {
+    fn child(&self) -> Option<usize> {
+        match *self {
+            Self::Child(index) => Some(index),
+            _ => None,
+        }
+    }
+
+    fn accepts(&self, token: &u8) -> bool {
+        match self {
+            Self::Byte(value) => value == token,
+            Self::Any => true,
+            Self::Child(_) => false,
+        }
+    }
+}
+
+impl<T: Eq> TrackAtom<T> for TokenAtom<T> {
+    fn child(&self) -> Option<usize> {
+        match *self {
+            Self::Child(index) => Some(index),
+            _ => None,
+        }
+    }
+
+    fn accepts(&self, token: &T) -> bool {
+        match self {
+            Self::Equals(value) => value == token,
+            Self::Predicate(predicate) => predicate(token),
+            Self::Any => true,
+            Self::Child(_) => false,
+        }
+    }
+}
+
+/// A byte-track production. For other token types, use [`TokenProduction`].
+pub type Production<O, const TRACKS: usize> = TokenProduction<O, TRACKS, u8, Atom>;
+
+/// A byte-track grammar. For other token types, use [`TokenGrammar`].
+pub type Grammar<O, const TRACKS: usize> = TokenGrammar<O, TRACKS, u8, Atom>;
+
+/// A compiled byte-track grammar bound to input.
+pub type Sequence<'a, O, const TRACKS: usize> = TokenSequence<'a, O, TRACKS, u8, Atom>;
+
+/// Coordinates of one byte production occurrence.
+pub type Matched<'a, const TRACKS: usize> = TokenMatched<'a, TRACKS, u8>;
+
+/// Coordinates of one production occurrence. Spans are half-open token-index ranges.
+pub struct TokenMatched<'a, const TRACKS: usize, T> {
+    pub inputs: [&'a [T]; TRACKS],
     pub parent: &'a [Range<usize>; TRACKS],
     pub children: &'a [[Range<usize>; TRACKS]],
 }
 
+/// Builds a constructor payload from one matched production occurrence.
+pub type SequenceConstructor<O, const TRACKS: usize, T = u8> =
+    dyn Fn(TokenMatched<'_, TRACKS, T>) -> O;
+
 /// An ordered constructor clause. Each child occurs once on each track.
-pub struct Production<O, const TRACKS: usize> {
+pub struct TokenProduction<O, const TRACKS: usize, T, A = TokenAtom<T>> {
     pub name: String,
     pub parent: Nonterminal,
     pub children: Vec<Nonterminal>,
-    pub tracks: [Vec<Atom>; TRACKS],
+    pub tracks: [Vec<A>; TRACKS],
     /// Construct the payload for a match. Keep the function deterministic.
-    pub operator: Box<dyn Fn(Matched<'_, TRACKS>) -> O>,
+    pub operator: Box<SequenceConstructor<O, TRACKS, T>>,
 }
 
 /// A context-free grammar over one or two contiguous input tracks.
@@ -40,23 +115,23 @@ pub struct Production<O, const TRACKS: usize> {
 /// order. Within a rule, splits are tried in increasing boundary order on
 /// each track, starting with track zero. Constructor children retain their
 /// declared order even when another track visits them in a different order.
-pub struct Grammar<O, const TRACKS: usize> {
+pub struct TokenGrammar<O, const TRACKS: usize, T, A = TokenAtom<T>> {
     root: Nonterminal,
     order: Vec<Nonterminal>,
     positions: Vec<usize>,
-    rules: Vec<Vec<Lowered<O, TRACKS>>>,
+    rules: Vec<Vec<Lowered<O, TRACKS, T, A>>>,
     yields: Vec<[Option<usize>; TRACKS]>,
     nullable: Vec<bool>,
     positive: Vec<[bool; TRACKS]>,
 }
 
-struct Lowered<O, const TRACKS: usize> {
-    definition: Production<O, TRACKS>,
+struct Lowered<O, const TRACKS: usize, T, A> {
+    definition: TokenProduction<O, TRACKS, T, A>,
     suffix_minima: [Vec<usize>; TRACKS],
     suffix_empty: [Vec<bool>; TRACKS],
 }
 
-impl<O: Operator, const TRACKS: usize> Grammar<O, TRACKS> {
+impl<O: Operator, const TRACKS: usize, T: Eq, A: TrackAtom<T>> TokenGrammar<O, TRACKS, T, A> {
     /// Compile ordered productions and determine the dependencies between
     /// nonterminals that can use the same span. Unsupported declarations
     /// report the matching grammar, nonterminal or rule name.
@@ -65,9 +140,9 @@ impl<O: Operator, const TRACKS: usize> Grammar<O, TRACKS> {
     pub fn new(
         names: &[&str],
         root: Nonterminal,
-        productions: Vec<Production<O, TRACKS>>,
+        productions: Vec<TokenProduction<O, TRACKS, T, A>>,
     ) -> Result<Self, Error> {
-        if !(1..=2).contains(&TRACKS) {
+        if !SUPPORTED_TRACKS.contains(&TRACKS) {
             return Err(refusal("sequence", "expected one or two input tracks"));
         }
         if root >= names.len() {
@@ -92,7 +167,7 @@ impl<O: Operator, const TRACKS: usize> Grammar<O, TRACKS> {
             for track in &rule.tracks {
                 let mut seen = vec![false; rule.children.len()];
                 for atom in track {
-                    if let Atom::Child(index) = *atom {
+                    if let Some(index) = atom.child() {
                         let Some(used) = seen.get_mut(index) else {
                             return Err(refusal(&rule.name, "unknown child on input track"));
                         };
@@ -139,13 +214,12 @@ impl<O: Operator, const TRACKS: usize> Grammar<O, TRACKS> {
                 let empty = &mut suffix_empty[track];
                 *empty = vec![true; atoms.len() + 1];
                 for i in (0..atoms.len()).rev() {
-                    let width = atom_minimum(atoms[i], &rule.children, &yields, track).unwrap();
+                    let width = atom_minimum(&atoms[i], &rule.children, &yields, track).unwrap();
                     suffix[i] = suffix[i + 1].checked_add(width).ok_or(Error::Overflow)?;
                     empty[i] = empty[i + 1]
-                        && match atoms[i] {
-                            Atom::Child(index) => !positive[rule.children[index]][track],
-                            Atom::Byte(_) | Atom::Any => false,
-                        };
+                        && atoms[i]
+                            .child()
+                            .is_some_and(|index| !positive[rule.children[index]][track]);
                 }
             }
             rules[rule.parent].push(Lowered {
@@ -165,34 +239,41 @@ impl<O: Operator, const TRACKS: usize> Grammar<O, TRACKS> {
         })
     }
 
-    /// The lower bound on each track, independently. An unproductive
-    /// nonterminal has no finite bound. Returns None for an unknown ID.
+    /// Independent structural lower bounds by track. Each terminal
+    /// contributes one token regardless of its predicate. An unknown
+    /// nonterminal returns outer `None`. An unproductive one has absent bounds.
     pub fn minimum_yields(&self, nonterminal: Nonterminal) -> Option<[Option<usize>; TRACKS]> {
         self.yields.get(nonterminal).copied()
     }
 
     /// Bind a reusable grammar to its concrete inputs and calculate its ranks.
+    /// A rank-count overflow is reported before allocating any track offsets.
     pub fn bind<'a>(
         &'a self,
-        inputs: [&'a [u8]; TRACKS],
-    ) -> Result<Sequence<'a, O, TRACKS>, Error> {
-        let mut offsets = std::array::from_fn(|_| Vec::new());
+        inputs: [&'a [T]; TRACKS],
+    ) -> Result<TokenSequence<'a, O, TRACKS, T, A>, Error> {
+        let mut boundaries = [0; TRACKS];
         let mut sizes = [0; TRACKS];
         let mut cell_count = self.order.len();
         for (track, input) in inputs.iter().enumerate() {
-            let n = input.len();
-            let boundaries = n.checked_add(1).ok_or(Error::Overflow)?;
-            let triangular = (boundaries as u128) * (boundaries as u128 + 1) / 2;
+            let count = input.len().checked_add(1).ok_or(Error::Overflow)?;
+            let triangular = (count as u128) * (count as u128 + 1) / 2;
             let size = usize::try_from(triangular).map_err(|_| Error::Overflow)?;
+            boundaries[track] = count;
             sizes[track] = size;
             cell_count = cell_count.checked_mul(size).ok_or(Error::Overflow)?;
+        }
+
+        let mut offsets = std::array::from_fn(|_| Vec::new());
+        for (offsets, boundaries) in offsets.iter_mut().zip(boundaries) {
+            *offsets = reserve_table(boundaries)?;
             let mut next = 0;
-            for length in 0..=n {
-                offsets[track].push(next);
+            for length in 0..boundaries {
+                offsets.push(next);
                 next += boundaries - length;
             }
         }
-        let mut bound = Sequence {
+        let mut bound = TokenSequence {
             grammar: self,
             inputs,
             offsets,
@@ -212,15 +293,15 @@ fn refusal(name: &str, reason: &'static str) -> Error {
     }
 }
 
-fn atom_minimum<const TRACKS: usize>(
-    atom: Atom,
+fn atom_minimum<const TRACKS: usize, T>(
+    atom: &impl TrackAtom<T>,
     children: &[Nonterminal],
     yields: &[[Option<usize>; TRACKS]],
     track: usize,
 ) -> Option<usize> {
-    match atom {
-        Atom::Child(index) => yields[children[index]][track],
-        Atom::Byte(_) | Atom::Any => Some(1),
+    match atom.child() {
+        Some(index) => yields[children[index]][track],
+        None => Some(1),
     }
 }
 
@@ -244,9 +325,9 @@ impl YieldWidth {
     }
 }
 
-fn minimum_yields<O, const TRACKS: usize>(
+fn minimum_yields<O, const TRACKS: usize, T, A: TrackAtom<T>>(
     nonterminals: usize,
-    productions: &[Production<O, TRACKS>],
+    productions: &[TokenProduction<O, TRACKS, T, A>],
 ) -> Result<Vec<[Option<usize>; TRACKS]>, Error> {
     use YieldWidth::*;
     let mut yields = vec![[Unproductive; TRACKS]; nonterminals];
@@ -255,10 +336,10 @@ fn minimum_yields<O, const TRACKS: usize>(
         for rule in productions {
             for track in 0..TRACKS {
                 let mut length = Finite(0);
-                for &atom in &rule.tracks[track] {
-                    let width = match atom {
-                        Atom::Child(index) => yields[rule.children[index]][track],
-                        Atom::Byte(_) | Atom::Any => Finite(1),
+                for atom in &rule.tracks[track] {
+                    let width = match atom.child() {
+                        Some(index) => yields[rule.children[index]][track],
+                        None => Finite(1),
                     };
                     length = length.add(width);
                     if length == Unproductive {
@@ -292,8 +373,8 @@ fn minimum_yields<O, const TRACKS: usize>(
         .collect()
 }
 
-fn positive_yields<O, const TRACKS: usize>(
-    rules: &[Production<O, TRACKS>],
+fn positive_yields<O, const TRACKS: usize, T, A: TrackAtom<T>>(
+    rules: &[TokenProduction<O, TRACKS, T, A>],
     minima: &[[Option<usize>; TRACKS]],
 ) -> Vec<[bool; TRACKS]> {
     let mut positive = vec![[false; TRACKS]; minima.len()];
@@ -309,9 +390,9 @@ fn positive_yields<O, const TRACKS: usize>(
             }
             for track in 0..TRACKS {
                 if !positive[rule.parent][track]
-                    && rule.tracks[track].iter().any(|atom| match *atom {
-                        Atom::Child(index) => positive[rule.children[index]][track],
-                        Atom::Byte(_) | Atom::Any => true,
+                    && rule.tracks[track].iter().any(|atom| {
+                        atom.child()
+                            .is_none_or(|index| positive[rule.children[index]][track])
                     })
                 {
                     positive[rule.parent][track] = true;
@@ -325,9 +406,9 @@ fn positive_yields<O, const TRACKS: usize>(
     }
 }
 
-fn nullable_nonterminals<O, const TRACKS: usize>(
+fn nullable_nonterminals<O, const TRACKS: usize, T, A: TrackAtom<T>>(
     nonterminals: usize,
-    rules: &[Production<O, TRACKS>],
+    rules: &[TokenProduction<O, TRACKS, T, A>],
 ) -> Vec<bool> {
     let mut nullable = vec![false; nonterminals];
     loop {
@@ -338,7 +419,7 @@ fn nullable_nonterminals<O, const TRACKS: usize>(
                     .tracks
                     .iter()
                     .flatten()
-                    .all(|atom| matches!(atom, Atom::Child(_)))
+                    .all(|atom| atom.child().is_some())
                 && rule.children.iter().all(|&child| nullable[child])
             {
                 nullable[rule.parent] = true;
@@ -351,9 +432,9 @@ fn nullable_nonterminals<O, const TRACKS: usize>(
     }
 }
 
-fn dependency_order<O, const TRACKS: usize>(
+fn dependency_order<O, const TRACKS: usize, T, A: TrackAtom<T>>(
     names: &[&str],
-    rules: &[Production<O, TRACKS>],
+    rules: &[TokenProduction<O, TRACKS, T, A>],
     nullable: &[bool],
 ) -> Result<Vec<Nonterminal>, Error> {
     let mut dependencies = vec![Vec::new(); names.len()];
@@ -362,7 +443,7 @@ fn dependency_order<O, const TRACKS: usize>(
             .tracks
             .iter()
             .flatten()
-            .any(|atom| !matches!(atom, Atom::Child(_)))
+            .any(|atom| atom.child().is_none())
         {
             continue;
         }
@@ -392,17 +473,17 @@ fn dependency_order<O, const TRACKS: usize>(
     Ok(order)
 }
 
-/// A compiled sequence grammar bound to byte slices.
-pub struct Sequence<'a, O, const TRACKS: usize> {
-    grammar: &'a Grammar<O, TRACKS>,
-    inputs: [&'a [u8]; TRACKS],
+/// A compiled sequence grammar bound to token slices.
+pub struct TokenSequence<'a, O, const TRACKS: usize, T, A = TokenAtom<T>> {
+    grammar: &'a TokenGrammar<O, TRACKS, T, A>,
+    inputs: [&'a [T]; TRACKS],
     offsets: [Vec<usize>; TRACKS],
     sizes: [usize; TRACKS],
     cell_count: usize,
     root: Cell,
 }
 
-impl<O: Operator, const TRACKS: usize> Sequence<'_, O, TRACKS> {
+impl<O: Operator, const TRACKS: usize, T: Eq, A: TrackAtom<T>> TokenSequence<'_, O, TRACKS, T, A> {
     fn rank(&self, nonterminal: Nonterminal, spans: &[Range<usize>; TRACKS]) -> Cell {
         let mut rank = 0;
         for (track, span) in spans.iter().enumerate() {
@@ -474,15 +555,15 @@ struct MatchScratch<const TRACKS: usize> {
     children: Vec<Cell>,
 }
 
-struct MatchRule<'a, 'input, O, const TRACKS: usize> {
-    sequence: &'a Sequence<'input, O, TRACKS>,
-    rule: &'a Lowered<O, TRACKS>,
+struct MatchRule<'a, 'input, O, const TRACKS: usize, T, A> {
+    sequence: &'a TokenSequence<'input, O, TRACKS, T, A>,
+    rule: &'a Lowered<O, TRACKS, T, A>,
     parent: &'a [Range<usize>; TRACKS],
     child_spans: &'a mut [[Range<usize>; TRACKS]],
     children: &'a mut [Cell],
 }
 
-impl<O: Operator, const TRACKS: usize> MatchRule<'_, '_, O, TRACKS> {
+impl<O: Operator, const TRACKS: usize, T: Eq, A: TrackAtom<T>> MatchRule<'_, '_, O, TRACKS, T, A> {
     fn visit(
         &mut self,
         track: usize,
@@ -501,7 +582,7 @@ impl<O: Operator, const TRACKS: usize> MatchRule<'_, '_, O, TRACKS> {
                 }
                 self.children[i] = self.sequence.rank(nt, spans);
             }
-            let operator = (rule.operator)(Matched {
+            let operator = (rule.operator)(TokenMatched {
                 inputs: self.sequence.inputs,
                 parent: self.parent,
                 children: self.child_spans,
@@ -520,8 +601,8 @@ impl<O: Operator, const TRACKS: usize> MatchRule<'_, '_, O, TRACKS> {
             let next = self.parent.get(track + 1).map_or(0, |span| span.start);
             return self.visit(track + 1, 0, next, emit);
         };
-        match *symbol {
-            Atom::Child(child) => {
+        match symbol.child() {
+            Some(child) => {
                 let minimum = bounds[atom] - bounds[atom + 1];
                 let suffix_empty = self.rule.suffix_empty[track][atom + 1];
                 let child_positive =
@@ -537,14 +618,18 @@ impl<O: Operator, const TRACKS: usize> MatchRule<'_, '_, O, TRACKS> {
                     self.visit(track, atom + 1, split, emit)?;
                 }
             }
-            Atom::Byte(byte) if self.sequence.inputs[track][start] != byte => {}
-            Atom::Byte(_) | Atom::Any => self.visit(track, atom + 1, start + 1, emit)?,
+            None if symbol.accepts(&self.sequence.inputs[track][start]) => {
+                self.visit(track, atom + 1, start + 1, emit)?;
+            }
+            None => {}
         }
         Ok(())
     }
 }
 
-impl<O: Operator, const TRACKS: usize> RuleSource for Sequence<'_, O, TRACKS> {
+impl<O: Operator, const TRACKS: usize, T: Eq, A: TrackAtom<T>> RuleSource
+    for TokenSequence<'_, O, TRACKS, T, A>
+{
     type Op = O;
 
     fn cell_count(&self) -> usize {
@@ -568,9 +653,14 @@ impl<O: Operator, const TRACKS: usize> RuleSource for Sequence<'_, O, TRACKS> {
     }
 }
 
-impl<O: Operator, const TRACKS: usize> sealed::Sealed for Sequence<'_, O, TRACKS> {}
+impl<O: Operator, const TRACKS: usize, T: Eq, A: TrackAtom<T>> sealed::Sealed
+    for TokenSequence<'_, O, TRACKS, T, A>
+{
+}
 
-impl<O: Operator, const TRACKS: usize> Program for Sequence<'_, O, TRACKS> {
+impl<O: Operator, const TRACKS: usize, T: Eq, A: TrackAtom<T>> Program
+    for TokenSequence<'_, O, TRACKS, T, A>
+{
     fn fill(&self, output: &mut impl ProductionSink<O>) -> Result<(), Error> {
         let mut scratch = MatchScratch::default();
         for cell in 0..self.cell_count {

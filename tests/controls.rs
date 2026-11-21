@@ -1,4 +1,6 @@
-use zeno_adp::algebras::{Cost, Count, Minimum, MinimumCount, Optimum, ScoredOperator};
+use zeno_adp::algebras::{
+    Additive, Cost, CostPolicy, Count, Minimum, MinimumCount, Optimum, ScoredOperator,
+};
 use zeno_adp::classification::{Classes, Classification, Classified};
 use zeno_adp::grammars::{nussinov, Fold};
 use zeno_adp::{
@@ -460,5 +462,24 @@ fn unordered_audit_rejects_equal_length_bags_with_different_counts() {
     assert_eq!(
         observed,
         Some((0, Law::Merge, &[0, 0, 1][..], &[0, 1, 1][..]))
+    );
+}
+
+#[test]
+fn additive_infinity_policy_precedes_an_overflowing_prefix() {
+    let operator = Affine::Extend(Cost::Finite(i64::MAX));
+    let one = Cost::Finite(1);
+    let infinity = Cost::Infinity;
+    let finite = Additive::default();
+    let absorbs = Additive::new(CostPolicy::AttainableInfinity);
+    assert_eq!(finite.apply(&operator, &[&one]), Err(Error::Overflow));
+    assert_eq!(absorbs.apply(&operator, &[&one]), Err(Error::Overflow));
+    assert_eq!(
+        finite.apply(&operator, &[&one, &infinity]),
+        Err(Error::InfinityDisabled)
+    );
+    assert_eq!(
+        absorbs.apply(&operator, &[&one, &infinity]),
+        Ok(Cost::Infinity)
     );
 }

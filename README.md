@@ -4,7 +4,7 @@ Zeno-ADP is a Rust library for algebraic dynamic programming. A grammar
 builds candidate trees. Algebras ask questions about those trees, including
 the minimum or maximum score, counts, Pareto fronts and distributions over
 derivations. The query guide lists what each algebra counts and how to
-check its answers. [Query guide](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.1.0/docs/QUESTIONS.md)
+check its answers. [Query guide](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.3.0/docs/QUESTIONS.md)
 
 ## Installation
 
@@ -12,7 +12,7 @@ Add the crate to your application's `Cargo.toml`.
 
 ```toml
 [dependencies]
-zeno-adp = "0.1.0"
+zeno-adp = "0.3.0"
 ```
 
 ## Find the cheapest matrix parenthesization
@@ -41,15 +41,22 @@ fn main() -> Result<(), zeno_adp::Error> {
 
 ## Pick a grammar and an evaluation mode
 
-Use built-in sequence grammars or declare one or two byte tracks with
-`compiled::Grammar`. For forests, crossing dependencies and subsets, use
+Use built-in sequence grammars, declare one or two byte tracks with
+`compiled::Grammar`, or use `compiled::TokenGrammar` for `Eq` tokens
+and predicate terminals. Use `compiled_grammar!` for generated prefix
+and interval tables. For forests, crossing dependencies and subsets, use
 the structural grammars. `compiled::replay` reports the cell rank, occurrence
 ordinal, clause name, constructor payload and ordered child ranks.
 `compiled::tabulate_root` observes each cell as it finishes and keeps the
 root and live summaries, with a last-use entry for each rank.
-[Compiler guide](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.1.0/docs/COMPILER.md) ·
-[Streaming and recovery](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.1.0/docs/FAST.md) ·
-[Forests, crossings and sets](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.1.0/docs/STRUCTURES.md)
+[Compiler guide](docs/COMPILER.md) ·
+[Streaming and recovery](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.3.0/docs/FAST.md) ·
+[Forests, crossings and sets](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.3.0/docs/STRUCTURES.md)
+
+Build an alignment grammar from two ranked prefix grammars with
+`grammars::PrefixProduct`. For one minimum-cost unit alignment,
+`fast::alignment_linear_space` recovers the first optimal path using a
+single working row. [Products and recovery](docs/FAST.md)
 
 For tree queries, pass `TreeMultiplicity::default()` for distinct ordered
 constructor terms or `TreeMultiplicity::Derivations` for occurrences.
@@ -59,19 +66,29 @@ table, as does `first_minimum_tree`. Both rank in ascending score order
 and keep first derivation order for ties. `Count` counts occurrences.
 `Classes` lists distinct keys. `Classified` applies a question per key
 and may return several pairs per key.
-[Ranking contracts](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.1.0/docs/QUESTIONS.md#ranking-trees)
+[Ranking contracts](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.3.0/docs/QUESTIONS.md#ranking-trees)
 
-Exact weighted algebras use checked rational arithmetic. `ExactSampler`
-uses independent uniform `u64` words and draws on a positive partition.
+`ParetoWitnesses` retains every non-dominated derivation in order for two
+fixed additive costs with representable ordered sums. `Provenance`
+counts derivation label multisets. Substitute one fixed weight per label
+in a lawful commutative semiring to reuse the polynomial.
+[Question guide](docs/QUESTIONS.md)
+
+Use bounded or arbitrary-precision nonnegative rationals for sum-product
+and max-product tabulation and reference audits. On a fixed chart,
+`Expectation` returns total mass and an unnormalized weighted feature sum
+or partition derivative. At positive mass, `normalized()` returns the
+expected feature or log-partition derivative. `ExactSampler` uses independent uniform `u64` words and draws on a positive partition.
 Equal returned terms collect their derivation masses. Binary64 log
 algebras support approximate evaluations. Use exact arithmetic for
-equality audits. [Weighted questions](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.1.0/docs/QUESTIONS.md#partition-functions-and-sampling)
+equality audits. [Weighted questions](docs/QUESTIONS.md#partition-functions-and-sampling)
 
 ## Check a bounded input
 
 `audit_bounded` evaluates the ranked reference chart. For a compiled
 program, collect its emissions with `compiled::reference_chart`. Audit
-a product with its paired chooser. A completed report exposes Bellman
+a grammar product on the chart collected by `fast::reference_chart`.
+Audit an algebra product with its paired chooser. A completed report exposes Bellman
 failures in `bellman.first_failure` and duplicate identities in
 `ambiguities`. A budget or evaluation error leaves the verdict incomplete.
 
@@ -85,13 +102,16 @@ operations on discarded branches and on every cell evaluated.
 Rust's reference table was finite checked against that specification on
 1,892 charts covering short folding, alignment, matrix-chain and knapsack
 inputs and a four-cell fixture. The audit guide gives the exact domains
-and five answers compared at each rank. [Audit guide](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.1.0/docs/AUDIT.md#verification-scope)
+and five answers compared at each rank. [Audit guide](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.3.0/docs/AUDIT.md#verification-scope)
 
 Run `cargo run --offline --locked --example matrix_chain` from the checkout.
 The other examples cover alignment, folding, knapsack, custom sequence and
-streaming grammars, weighted derivations and structures. [Examples](https://github.com/TheDarkLightX/Zeno-ADP/tree/v0.1.0/examples)
+streaming grammars, structural grammars, weighted derivations, change-point detection and optimal binary search trees.
+[Examples](examples/)
 
-[API documentation](https://docs.rs/zeno-adp/0.1.0/zeno_adp/) · [MIT license](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.1.0/LICENSE)
+[API documentation](https://docs.rs/zeno-adp/0.3.0/zeno_adp/) · [MIT license](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.3.0/LICENSE)
+
+See the [changelog](CHANGELOG.md) when upgrading from 0.1.0.
 
 ## Acknowledgements
 

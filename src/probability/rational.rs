@@ -40,7 +40,7 @@ impl Rational {
         }
     }
 
-    pub fn numerator(self) -> u128 {
+    pub const fn numerator(self) -> u128 {
         self.numerator
     }
 
@@ -49,19 +49,24 @@ impl Rational {
     }
 
     pub fn checked_add(self, other: Self) -> Result<Self, Error> {
+        self.combine_numerators(other, u128::checked_add)
+    }
+
+    pub(super) fn checked_abs_diff(self, other: Self) -> Result<Self, Error> {
+        self.combine_numerators(other, |a, b| Some(a.abs_diff(b)))
+    }
+
+    fn combine_numerators(
+        self,
+        other: Self,
+        combine: impl FnOnce(u128, u128) -> Option<u128>,
+    ) -> Result<Self, Error> {
         let g = gcd(self.denominator(), other.denominator());
         let b = self.denominator() / g;
         let d = other.denominator() / g;
-        let numerator = self
-            .numerator
-            .checked_mul(d)
-            .and_then(|left| {
-                other
-                    .numerator
-                    .checked_mul(b)
-                    .and_then(|right| left.checked_add(right))
-            })
-            .ok_or(Error::Overflow)?;
+        let left = self.numerator.checked_mul(d).ok_or(Error::Overflow)?;
+        let right = other.numerator.checked_mul(b).ok_or(Error::Overflow)?;
+        let numerator = combine(left, right).ok_or(Error::Overflow)?;
         let cancel = gcd(numerator, g);
         let denominator = b
             .checked_mul(other.denominator() / cancel)

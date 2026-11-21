@@ -59,6 +59,41 @@ exponentially many co-optima. Ranked recovery can also need additional
 competitive cells and generate up to k squared combinations at a child
 join before truncation.
 
+## Compose prefix grammars
+
+`grammars::PrefixProduct::new` takes two ranked nullary/unary charts and
+returns a `RuleSource`. Build a chart from ordinary tokens using
+`grammars::sequence_prefixes`. Each product rank combines a pair of
+operand ranks and equals `left_rank * right_cell_count + right_rank`.
+Two nullary rules terminate together. A paired unary rule advances both
+operands. A one-sided advance holds the other rank fixed. A product
+derivation chooses an operand derivation on each side and an alignment
+of their unary steps. One step on each side admits three alignments.
+
+Paired rules come first in operand order, followed by left-only and
+right-only rules. Constructor payloads on both sides and repeated
+productions survive in `ProductColumn`. The root is the pair of operand
+roots. Higher arities produce `Error::UnsupportedGrammar`. Use
+`fast::reference_chart` to collect the product for an audit.
+
+## Recover one global alignment in linear space
+
+`fast::alignment_linear_space(left, right)` returns the unit-cost edit
+distance and the first optimal alignment in reference derivation order.
+`AlignmentPath::columns` visits columns from start to end.
+`AlignmentPath::into_tree` materializes the same unary constructor term,
+with one node per column plus the start node. Dropping a `Tree` walks its
+children iteratively. `AlignmentPath` keeps its columns in flat storage.
+
+The recurrence carries the selected predecessor's midpoint crossing
+edge. Two recursive calls recover the subpaths on either side of that edge.
+Ties follow diagonal, left, then right in backward traceback, including
+when the implementation swaps the working axes. The workspace is one row
+of length `min(left.len(), right.len()) + 1` and logarithmic recursion
+depth. The returned path uses space proportional to the input lengths.
+For input lengths `m` and `n`, running time is `O(mn + m + n + 1)`.
+Use the rectangular reference chart for audits.
+
 ## Conditions for exact results
 
 A finite, deterministic source and an additive finite score with all

@@ -1,19 +1,24 @@
 [package]
 name = "zeno-adp"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
 authors = ["Dana Edwards (TheDarkLightX)"]
 license = "MIT"
 description = "Algebraic dynamic programming over ranked tree grammars"
 repository = "https://github.com/TheDarkLightX/Zeno-ADP"
-documentation = "https://docs.rs/zeno-adp"
+documentation = "https://docs.rs/zeno-adp/0.3.0/zeno_adp/"
 readme = "README.md"
 keywords = ["dynamic-programming", "grammars", "optimization", "algebra"]
 categories = ["algorithms", "science"]
 include = [
-    "/src/**", "/docs/**", "/examples/**", "/tests/**",
+    "/src/**", "/docs/**", "!/docs/DESIGN.md", "!/docs/LITERATURE.md",
+    "/examples/**", "/tests/**",
     "/Cargo.toml", "/Cargo.lock", "/README.md", "/CHANGELOG.md", "/LICENSE",
 ]
+
+[dependencies]
+num-bigint = "0.4.8"
+num-integer = "0.1.46"
 
 [profile.dev]
 debug = 0

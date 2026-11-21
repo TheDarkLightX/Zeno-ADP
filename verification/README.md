@@ -26,6 +26,19 @@ counts when an absorbing rule receives only optimal counts.
 `BellmanProbability.lean` establishes the ranked sum-product theorem over
 rationals and max-product over nonnegative rationals. It also checks the
 local cancellation of the remaining suffix mass in exact sampling.
+`BellmanExpectation.lean` proves the expectation pair's Bellman
+obligations over rational components and exact equality at every rank.
+Its Rust differential grid uses independent explicit products and
+leave-one-factor-out sums. `GeneratedRanks.lean` checks descent in the
+prefix and end-major interval layouts over natural numbers. The
+`GeneratedRanks.pivot_children_from_offsets` equality relates offset
+traversal to the two interval child ranks.
+`ProductProvenance.lean` proves row-major rank descent for the grammar
+product and preservation of strict pair dominance under integer
+translation. Its projection theorem maps a ranked mathematical table
+into another table under any merge- and combination-preserving map,
+including the empty-bag distinction. The finite Rust gates check
+canonical polynomial construction and projection.
 `BellmanFrontiers.lean` checks the Pareto merge and operator laws as front
 set equalities and proves the integer additive operator preserves the
 required order. The ranked Pareto theorem assumes that the chooser
@@ -78,10 +91,10 @@ against a 120-digit decimal oracle. The result applies to the exercised
 platform and the conversion alone. The [weighted questions guide](../docs/QUESTIONS.md#partition-functions-and-sampling)
 gives the bound's arithmetic premises.
 
-The proof concerns the Lean model. The Rust correspondence is finite
-checked on the domains in `rust_bridge.rs`. Rust uses checked `i64` and
-`u128` operations, so application of the exact laws requires representable
-intermediate arithmetic. When claiming equality to exhaustive Rust
-execution, the condition also covers derivations removed by early choice.
-See the [audit guide](../docs/AUDIT.md) for bounded arithmetic and operator
-checks on actual inputs.
+The five-question Rust–Lean bridge starts after grammar emission. Separate
+Rust fixtures cover typed and generated emissions, derivatives, provenance,
+wide rationals, ordered Pareto witnesses, products and traceback. Checked
+arithmetic comparisons require every relevant ordered intermediate to
+be representable, including on derivations discarded by early choice.
+The audit guide covers bounded arithmetic and operator checks on actual
+inputs. [Audit guide](../docs/AUDIT.md)

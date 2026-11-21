@@ -8,6 +8,79 @@ operator payload and ordered child ranks of every emitted production. Use
 `compiled::reference_chart` to collect those emissions into a chart, then
 pass the chart to `zeno_adp::tabulate` or `zeno_adp::audit_bounded`.
 
+## Generating a schedule
+
+`compiled_grammar!` expands a declaration into a Rust function that binds
+a concrete slice to a compiled program. The clause loops and their child
+positions are fixed at compile time. An optional `with fn` pairs the
+program with a streaming algebra and generates a second function that
+returns its table by calling the generated grammar function. Use
+`with fn` at module scope or inside a function. The compiler rejects
+it in traits and implementations. For an associated grammar, omit
+`with fn` and call `compiled::tabulate(&Self::grammar(input)?, &algebra)`
+in the evaluation method.
+
+```rust
+use zeno_adp::{compiled_grammar, Operator};
+use zeno_adp::algebras::Count;
+
+#[derive(Clone)]
+struct Segments(usize);
+
+impl Operator for Segments {
+    fn arity(&self) -> usize { self.0 }
+}
+
+compiled_grammar! {
+    fn segments(input: char) -> Segments {
+        prefix |input, start, end|;
+        empty Empty => Ok(Some(Segments(0)));
+        extend Segment(split) => Ok((input[split] != ' ').then_some(Segments(1)));
+    }
+    with fn segment_count: Count = Count;
+}
+
+assert_eq!(segment_count(&['a', 'b', 'c']).unwrap().answer(), Some(&4));
+```
+
+Each clause supplies a Rust callback expression of type
+`Result<Option<Op>, Error>`. The names inside the expression resolve in
+the declaration's scope, with the input, bounds and split bindings shown
+in the layout and clause. Bounds and splits have type `usize`. The
+argument name in the function signature is available as a slice in the
+paired algebra expression. `Some` emits its constructor and `None` skips
+the occurrence. Operators and guards must be deterministic because a
+schedule can be replayed.
+The constructor's `Operator::arity` must agree with the clause shape.
+
+| Layout | Cells in rank order | Allowed clauses and children |
+|---|---|---|
+| `prefix` | `[0, end)` by ascending end, starting at zero | `empty` has no children and runs at the empty prefix. `extend(split)` tries `0 <= split < end` with child `[0, split)`. |
+| `interval` | `[start, end)` by ascending end, then descending start | `empty` has no children and runs at every empty span. `pivot(k)` tries `start <= k < end` with children `[start, k)` and `[k+1, end)` in that order. |
+
+Declare each clause under a unique name. The order of clauses and their
+ascending splits determines occurrence order, including repetitions from
+different clauses. The root is the full input. Each layout includes empty
+cells and cells whose guards admit no candidate. An unsupported layout or
+clause shape produces a compile-time diagnostic naming the layout or
+clause. Declare at least one clause. A clause returning `Ok(None)` can
+represent an empty language. Use a sequence grammar when you need
+multiple nonterminals or tracks.
+
+Use the bound program with `compiled::tabulate` to ask a second streaming
+question. Use `compiled::reference_chart` to inspect the ordered derivations
+or run any reference algebra and the bounded audit. The two worked
+examples include direct recurrences for comparison. Chart replay collects
+the expansion's own emissions. The direct and generated BST recurrences
+share the same interval-weight helper. The tests check emitted payloads
+using sums of the raw frequencies and check BST scores by enumerating
+trees and charging each key at its depth. The segmentation tests
+compute rule costs and enumerate cut sets from raw observations. The
+natural-number rank lemmas establish child descent and the interval
+offset traversal's child ranks.
+[Change-point detection](../examples/segmentation.rs) ·
+[Optimal binary search tree](../examples/optimal_bst.rs)
+
 ## Declaring a sequence grammar
 
 See [compiled_sequence.rs](../examples/compiled_sequence.rs) for a complete
@@ -17,9 +90,23 @@ constructor order. Each input track is a sequence of `Atom::Byte`,
 `Atom::Any`, and `Atom::Child` symbols. Every child occurs once per track.
 The tracks may place those children in different orders. A deterministic
 constructor callback receives the inputs and matched half-open spans and
-returns an operator with the declared number of children.
+returns an operator with the declared number of children. Byte callbacks
+receive `Matched<'_, TRACKS>`. Typed callbacks receive
+`TokenMatched<'_, TRACKS, T>`.
 
-The supported layouts use one or two contiguous byte-sequence tracks.
+For any token type implementing `Eq`, use `TokenGrammar`,
+`TokenProduction` and `TokenAtom`. `TokenAtom::Equals` matches a
+literal token. `TokenAtom::Predicate` takes a boxed deterministic
+function of `&T` and can capture its configuration. `TokenAtom::Any`
+and `TokenAtom::Child` work as on byte tracks. Each terminal consumes
+one token. Token spans use element offsets into the supplied slices.
+Predicates affect emission. Yield analysis treats every terminal as
+one token and computes a structural lower bound even for a predicate
+that always rejects. Matching, arity and payloads must repeat across
+traversals.
+
+The supported layouts use one or two contiguous sequence tracks of a
+single `Eq` token type, including predicate-only grammars.
 Child spans are matched in increasing split order, track zero first. Span
 ranks increase by length and then start on each track. Equal-span edges
 follow a derived order of nonterminals. A declaration that would require a
@@ -44,9 +131,11 @@ bound sequence grammars and `Chart` return `Error::CellOutOfRange` from
 `rules_at` before calling the visitor with a missing rank. Dense score,
 chart and last-use tables reserve their rank-indexed storage before
 traversal and return `Error::AllocationFailed` if that layout cannot be
-reserved. Arithmetic overflow in calculating a rank count is
-`Error::Overflow`. Binding a source computes its logical layout and
-can succeed when a particular dense table cannot be reserved.
+reserved. Sequence binding checks the complete rank count before
+allocating track offsets. Count overflow returns `Error::Overflow`.
+An offset reservation failure returns `Error::AllocationFailed`.
+Binding a source computes its logical layout and can succeed when a
+particular dense table cannot be reserved.
 
 ## Questions and backtracking
 

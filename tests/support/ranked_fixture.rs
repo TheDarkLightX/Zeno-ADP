@@ -23,7 +23,7 @@ pub fn at<O: Operator>(chart: &Chart<O>, cell: usize) -> Chart<O> {
     Chart::new(chart.cells().to_vec(), cell).unwrap()
 }
 
-pub fn assignments<T: Copy>(values: [T; 3]) -> impl Iterator<Item = [T; RANKS]> {
+pub fn assignments<T: Copy, const N: usize>(values: [T; N]) -> impl Iterator<Item = [T; RANKS]> {
     (0..values.len().pow(RANKS as u32)).map(move |mut index| {
         std::array::from_fn(|_| {
             let value = values[index % values.len()];

@@ -15,6 +15,7 @@ pub mod forests;
 pub mod grammars;
 pub mod mcfg;
 pub mod probability;
+pub mod provenance;
 pub mod queries;
 pub mod sets;
 
@@ -137,10 +138,39 @@ pub trait Operator: Clone {
     fn arity(&self) -> usize;
 }
 
+/// An ordered constructor tree. Destruction walks the tree iteratively.
+/// Payload destructors must provide their own stack bounds.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Tree<O> {
     pub operator: O,
     pub children: Vec<Tree<O>>,
+}
+
+impl<O> Tree<O> {
+    /// Move out the operator and children of an owned tree.
+    pub fn into_parts(self) -> (O, Vec<Self>) {
+        let tree = std::mem::ManuallyDrop::new(self);
+        // SAFETY: Each field is initialized and read exactly once. ManuallyDrop
+        // keeps the original tree from dropping either field after the move.
+        unsafe {
+            (
+                std::ptr::read(&tree.operator),
+                std::ptr::read(&tree.children),
+            )
+        }
+    }
+}
+
+impl<O> Drop for Tree<O> {
+    fn drop(&mut self) {
+        // Reuse the root's child buffer. A unary path needs only one slot.
+        let mut pending = std::mem::take(&mut self.children);
+        pending.reverse();
+        while let Some(mut node) = pending.pop() {
+            pending.extend(node.children.drain(..).rev());
+            // Dropping node here runs no further traversal: its children are empty.
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -179,9 +209,8 @@ impl<O: Operator> Chart<O> {
     }
 }
 
-fn validate_rule(cell: Cell, operator: &impl Operator, children: &[Cell]) -> Result<(), Error> {
+fn validate_arity(cell: Cell, operator: &impl Operator, actual: usize) -> Result<(), Error> {
     let expected = operator.arity();
-    let actual = children.len();
     if actual != expected {
         return Err(Error::Arity {
             cell,
@@ -189,6 +218,11 @@ fn validate_rule(cell: Cell, operator: &impl Operator, children: &[Cell]) -> Res
             actual,
         });
     }
+    Ok(())
+}
+
+fn validate_rule(cell: Cell, operator: &impl Operator, children: &[Cell]) -> Result<(), Error> {
+    validate_arity(cell, operator, children.len())?;
     for &child in children {
         if child >= cell {
             return Err(Error::NonDescendingChild { cell, child });

@@ -5,9 +5,13 @@
 //! contribute separately. Normalize by the root partition to obtain a
 //! distribution when that partition is positive.
 
+mod big;
+mod expectation;
 mod rational;
 mod sampling;
 
+pub use big::{BigMaxProduct, BigRational, BigSumProduct};
+pub use expectation::{Expectation, ExpectationOperator, ExpectationValue, SignedRational};
 pub use rational::Rational;
 pub use sampling::ExactSampler;
 
@@ -133,7 +137,7 @@ impl LogWeight {
     }
 }
 
-fn choose<M: Mass>(
+fn choose<M: Copy>(
     candidates: &[M],
     merge: impl Fn(M, M) -> Result<M, Error>,
 ) -> Result<Vec<M>, Error> {

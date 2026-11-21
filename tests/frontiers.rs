@@ -287,3 +287,167 @@ fn skyline_comparisons_on_an_antichain() {
     assert!(comparisons < WIDTH * (WIDTH - 1));
     println!("Pareto antichain width {WIDTH}: {comparisons} skyline scalar comparisons, {} pairwise dominance tests", WIDTH * (WIDTH - 1));
 }
+
+#[test]
+fn pareto_witnesses_agree_with_ordered_exhaustive_alignment() {
+    use zeno_adp::algebras::ParetoWitnesses;
+    use zeno_adp::grammars::{alignment, Align};
+
+    const MAX_LENGTH: usize = 3; // Complete small domain with ties and trade-offs.
+    let words: Vec<Vec<u8>> = (0..=MAX_LENGTH)
+        .flat_map(|n| {
+            (0..1_usize << n).map(move |b| (0..n).map(|i| ((b >> i) & 1) as u8).collect())
+        })
+        .collect();
+    let local = |op: &Align| match *op {
+        Align::Start => (0, 0),
+        Align::Diagonal { left, right } => (i64::from(left != right), 0),
+        Align::Left(_) | Align::Right(_) => (1, -1),
+    };
+    fn score_alignment(tree: &Tree<Align>, local: impl Fn(&Align) -> (i64, i64)) -> (i64, i64) {
+        let mut score = (0, 0);
+        let mut path = Some(tree);
+        while let Some(tree) = path {
+            let (a, b) = local(&tree.operator);
+            score = (score.0 + a, score.1 + b);
+            path = tree.children.first();
+        }
+        score
+    }
+    let mut ranks = 0;
+    let mut witnesses = 0;
+    for left in &words {
+        for right in &words {
+            let chart = alignment(left, right).unwrap();
+            let algebra = ParetoWitnesses::new(local);
+            let table = tabulate_cells(&chart, &algebra).unwrap();
+            for (cell, actual) in table.iter().enumerate() {
+                let chart_at_cell = at(&chart, cell);
+                let raw: Vec<_> = enumerate(&chart_at_cell)
+                    .into_iter()
+                    .map(|tree| RankedTree {
+                        value: score_alignment(&tree, local),
+                        tree,
+                    })
+                    .collect();
+                let expected: Vec<_> = raw
+                    .iter()
+                    .filter(|answer| {
+                        let (a, b) = answer.value;
+                        raw.iter().all(|other| {
+                            let (c, d) = other.value;
+                            (a, b) == (c, d) || c > a || d > b
+                        })
+                    })
+                    .cloned()
+                    .collect();
+                assert_eq!(*actual, expected);
+                witnesses += actual.len();
+                ranks += 1;
+            }
+        }
+    }
+    println!("Pareto witness ranks={ranks}, retained={witnesses}, disagreements=0");
+    assert_eq!(ranks, 2401);
+}
+
+#[test]
+fn pareto_witnesses_keep_interleaved_ties_and_refute_weak_collapse() {
+    use zeno_adp::algebras::ParetoWitnesses;
+
+    fn objective(arity: usize, a: i64, b: i64) -> Objective {
+        Objective {
+            arity,
+            cost: [a, b],
+        }
+    }
+
+    fn weight(op: &Objective) -> (i64, i64) {
+        (op.cost[0], op.cost[1])
+    }
+
+    let a = objective(0, 1, 0);
+    let b = objective(0, 0, 1);
+    let dominated = objective(0, 1, 1);
+    let parent = objective(1, 0, 0);
+    let chart = Chart::new(
+        vec![
+            vec![
+                Rule::new(a.clone(), []),
+                Rule::new(b, []),
+                Rule::new(a, []),
+                Rule::new(dominated, []),
+            ],
+            vec![],
+            vec![Rule::new(parent.clone(), [0]), Rule::new(parent, [1])],
+        ],
+        2,
+    )
+    .unwrap();
+    let ordered = ParetoWitnesses::new(weight);
+    let report = audit(&chart, &ordered).unwrap();
+    assert!(report.first_failure.is_none());
+    assert_eq!(
+        report.tabulated.iter().map(|a| a.value).collect::<Vec<_>>(),
+        [(1, 0), (0, 1), (1, 0)]
+    );
+    assert_eq!(report.tabulated[0], report.tabulated[2]);
+    assert!(tabulate_cells(&chart, &ordered).unwrap()[1].is_empty());
+
+    struct Collapse;
+    impl Algebra<Objective> for Collapse {
+        type Value = RankedTree<Objective, (i64, i64)>;
+        fn apply(&self, op: &Objective, children: &[&Self::Value]) -> Result<Self::Value, Error> {
+            let mut answer = ParetoWitnesses::new(weight).apply(op, children)?;
+            if op.arity > 0 {
+                answer.value = (0, 0);
+            }
+            Ok(answer)
+        }
+        fn choose(&self, candidates: &[Self::Value]) -> Result<Vec<Self::Value>, Error> {
+            ParetoWitnesses::new(weight).choose(candidates)
+        }
+    }
+    let report = audit(&chart, &Collapse).unwrap();
+    assert_eq!(report.oracle.len(), 4);
+    assert_eq!(report.tabulated.len(), 3);
+    assert_eq!(report.first_failure.unwrap().cell, 2);
+}
+
+#[test]
+fn pareto_witnesses_score_both_binary_children_in_order() {
+    use zeno_adp::algebras::ParetoWitnesses;
+
+    let rule = |cost, children: &[usize]| {
+        Rule::new(
+            Objective {
+                arity: children.len(),
+                cost,
+            },
+            children,
+        )
+    };
+    let chart = Chart::new(
+        vec![
+            vec![rule([1, -2], &[])],
+            vec![rule([3, -5], &[])],
+            vec![rule([0, 0], &[0, 0]), rule([0, 0], &[0, 1])],
+        ],
+        2,
+    )
+    .unwrap();
+    let question = ParetoWitnesses::new(|op: &Objective| (op.cost[0], op.cost[1]));
+    let cells = tabulate_cells(&chart, &question).unwrap();
+    assert_eq!(
+        cells[2].iter().map(|a| a.value).collect::<Vec<_>>(),
+        [(2, -4), (4, -7)]
+    );
+    for (rank, row) in cells.iter().enumerate() {
+        let expected = enumerate(&at(&chart, rank));
+        assert!(row
+            .iter()
+            .map(|answer| (&answer.tree, answer.value))
+            .eq(expected.iter().map(|tree| (tree, score(tree)))));
+    }
+    assert!(audit(&chart, &question).unwrap().first_failure.is_none());
+}

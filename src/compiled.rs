@@ -1,8 +1,14 @@
 //! Ordered production schedules, table filling and replay for sequence grammars.
 
+#[doc(hidden)]
+pub mod generated;
+mod grammar_macro;
 mod sequence;
 
-pub use sequence::{Atom, Grammar, Matched, Nonterminal, Production, Sequence};
+pub use sequence::{
+    Atom, Grammar, Matched, Nonterminal, Production, Sequence, SequenceConstructor, TokenAtom,
+    TokenGrammar, TokenMatched, TokenProduction, TokenSequence,
+};
 
 use std::collections::BTreeMap;
 
@@ -53,7 +59,8 @@ macro_rules! schedule {
 
 pub(crate) use schedule;
 
-/// Visit every emitted production, including disabled and repeated rules.
+/// Visit each emitted production in order, including repetitions and
+/// productions disabled by an absent child. A guard returning `None` emits nothing.
 /// The ordinal starts at zero in each logical cell. Repeated clause labels
 /// identify occurrences from the same site, such as different split points.
 pub fn replay<G: Program>(
@@ -130,6 +137,26 @@ struct Tabulation<'a, V, A> {
 }
 
 impl<O, A: Fold<O>> ProductionSink<O> for Tabulation<'_, A::Value, A> {
+    #[inline]
+    fn rule<const N: usize>(
+        &mut self,
+        site: &str,
+        operator: O,
+        children: [Cell; N],
+    ) -> Result<(), Error> {
+        if let [child] = children.as_slice() {
+            let value = self.cells[*child].as_ref();
+            crate::fast::fold_rule(
+                self.algebra,
+                &mut self.chosen,
+                &operator,
+                std::iter::once(value),
+            )
+        } else {
+            self.rule_slice(site, operator, &children)
+        }
+    }
+
     #[inline]
     fn rule_slice(&mut self, _: &str, operator: O, children: &[Cell]) -> Result<(), Error> {
         crate::fast::fold_rule(

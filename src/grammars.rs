@@ -4,6 +4,9 @@ use crate::compiled::{schedule, Program};
 use crate::fast::RuleSource;
 use crate::{reserve_table, Cell, Chart, Error, Operator, Rule};
 
+mod product;
+pub use product::{sequence_prefixes, Prefix, PrefixProduct, ProductColumn};
+
 struct Emit<F>(F);
 
 impl<O, F: FnMut(O, &[Cell]) -> Result<(), Error>> RankedRules<O> for Emit<F> {

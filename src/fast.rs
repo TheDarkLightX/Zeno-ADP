@@ -3,10 +3,12 @@
 //! A [`RuleSource`] regenerates one cell's ordered rules for a fast fold or
 //! tree recovery. Use [`reference_chart`] to evaluate general algebras and audit.
 
+mod alignment_path;
 mod backtrack;
 mod stream;
 mod tree_product;
 
+pub use alignment_path::{alignment_linear_space, AlignmentPath};
 pub use backtrack::{BestTable, Recovery};
 pub(crate) use stream::fold_rule;
 pub use stream::{reference_chart, tabulate, Fold, RuleSource, Table};

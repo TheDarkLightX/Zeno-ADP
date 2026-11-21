@@ -16,8 +16,12 @@ incomplete. See [Evaluating and auditing a grammar](AUDIT.md).
 | Lowest-scoring trees | `queries::co_minimal` and `queries::k_lowest` score root trees exhaustively. `Recovery::co_minimal`, `Recovery::k_lowest` and `Recovery::first_minimum_tree` use a finite additive table. See [the ranking contracts](#ranking-trees). | Explicit term or occurrence identity. | Ascending score, then first derivation order. Use `exhaustive` to apply the scorer's own chooser to the root bag. | Exhaustive ranking requires successful scoring. Audit the relevant additive or score-tree algebra when relying on early choice. |
 | Distinct class keys or a question per class | `Classes`, `Classified`. Classifier and inner question define operations and arithmetic. | Canonical class key, with ordered multiplicities supplied to each inner chooser. | Key order, then the inner chooser's order. | Audit the paired question with `audit_bounded_classified`. Inspect class collisions separately. |
 | Lexicographic or Pareto selection | `Product::new` with `lexicographic_min` or `pareto_min`. Both use the components' arithmetic. | One lexicographic pair or unique nondominated score pairs. | Ascending lexicographic minimum or front sorted lexicographically. Both Pareto coordinates are minimized. | Audit the paired algebra and chooser. |
+| Pareto witness trees | `ParetoWitnesses`. Two finite checked `i64` sums. | Every non-dominated occurrence with its score pair and tree. | Minimize both scores. Return survivors in derivation order. | Audit ordered witness bags. |
+| Rule-label provenance | `Provenance`, `Polynomial::evaluate`, `SemiringAlgebra`. Natural big-integer coefficients and exact label multisets. | Occurrences with the same multiset add to a coefficient. | Sorted terms; projected order follows the semiring question. | Audit the polynomial and compare each projection with the corresponding direct algebra. |
 | Trees within Δ | `WithinDelta`, `queries::within_delta`. Checked finite `i64` costs, `u64` inclusive difference. | Ordered occurrences in the algebra. The query takes explicit term or occurrence identity. | First derivation order within the band above the minimum. | Audit `WithinDelta` on the ordered bags. |
 | Derivation partition or best weight | `SumProduct`, `partition`, `MaxProduct`, `inside_outside`. Reduced rational, checked `u128`. | Occurrence mass. Outside sums contexts with one marked child position. | Sum for the partition, descending for the largest weight. | Audit the exact algebra. Compare outside separately against marked contexts. |
+| Big-integer partition or best weight | `SemiringAlgebra::new` with `BigSumProduct` or `BigMaxProduct`. Reduced `BigRational`. | Occurrence mass, including inhabited zero. | Sum or maximum of nonnegative derivation weights. | Audit the big-integer algebra on the reference chart. |
+| Expected additive feature or directional derivative | `Expectation`, with an exact mass and signed first-order component per constructor. Checked rational operations. | Derivation occurrences, including zero-mass occurrences with nonzero derivatives. | Sum mass and component, then optionally normalize. | Audit `Expectation` on the reconstructed or explicit chart. |
 | Approximate log weights | `LogSumProduct`, `LogMaxProduct`, `log_inside_outside`. Binary64. | Occurrence mass in log space. | Log-sum-exp for totals, descending log weight for maxima. | Use exact algebras for equality audits. Compare log results with a domain-specific error allowance. |
 | Sample a weighted tree | `ExactSampler`. Checked rational branch probabilities and independent uniform `u64` words. | Draw a derivation. Equal returned terms collect occurrence masses. | Sample, with no score ordering. | Audit `SumProduct` for inside mass. Check sampling separately against exact derivation probabilities. |
 | Distinct binary count or intersection | `BinaryTreeGrammar::distinct_counts`. Checked `u128` acceptance buckets. | Ordered tree terms at an exact leaf count. | None. | Compare profiles to explicit term sets on reference charts. Audit their derivation algebra separately. |
@@ -101,6 +105,47 @@ requires negative infinity for zero. [Weighted test](../tests/probability.rs)
 Run `cargo run --offline --locked --example weighted_chart` for a weighted
 chart with two repeated child positions.
 
+For weights or results beyond `u128`, use
+`SemiringAlgebra::new(BigSumProduct, weight)` or
+`SemiringAlgebra::new(BigMaxProduct, weight)`, with a weight function
+returning `BigRational`. Import the wide algebras and rational from
+`probability` and `BigUint` and `SemiringAlgebra` from `provenance`.
+Convert a bounded fraction with `BigRational::from`
+or supply two big integers to `BigRational::new`. A zero denominator
+returns `None`. Both algebras use the existing reference audit, with
+its caller-supplied tree node budget. Integer allocations depend on
+the size of the values. These entry points cover sum-product and
+max-product tabulation and audit.
+
+## Expected features and derivatives
+
+Implement `probability::ExpectationOperator` to supply an
+`ExpectationValue { mass, moment }` per constructor occurrence. For a
+local additive feature, use `ExpectationValue::weighted_feature` to
+multiply that possibly signed feature by the local weight. For a
+directional derivative, supply the local weight and its derivative
+directly. One evaluation carries one feature or direction.
+
+Alternative contributions add componentwise. For two pairs
+`(p, a)` and `(q, b)`, composition gives `(p*q, p*b + a*q)`.
+Distributivity and associativity over exact rationals give the local
+Bellman laws. A derivation's raw component is its weight times the
+sum of its local features, or the product-rule derivative of its weight.
+The table sums those components over derivations. An inhabited cell
+can have zero mass and a nonzero derivative.
+
+At positive mass, `normalized()` returns the expected feature or the
+directional derivative of the log partition. At zero mass it returns
+`Ok(None)`. The raw component still gives the derivative of the partition
+at that weight assignment. Use `tabulate_cells`, `compiled::tabulate` or
+`audit_bounded`. Fractions use checked `u128` magnitudes for both signs.
+An intermediate can overflow before a later cancellation. Audits use
+the full reference derivation bags. Lean proves exhaustive equality for
+the rational-pair model. The derivative interpretation was finite
+checked against explicit products at 1,024 fixture ranks.
+
+[Eisner, Parameter Estimation for Probabilistic Finite-State Transducers, §4](https://aclanthology.org/P02-1001/)
+
 ## Pareto fronts and score bands
 
 Use `Product::new(left, right, pareto_min)` to minimize two scores together.
@@ -111,8 +156,16 @@ replacing the discarded child can only improve the parent or leave its
 score equal. That also gives the merge law, since a local dominator
 remains a candidate in the merged bag. Coordinatewise finite additive
 costs satisfy this condition when the required sums are representable.
-The result is a front of scores. Queries about the witnesses or multiplicity
-behind a score need their own algebra and law.
+Use `ParetoWitnesses::new(local_cost)` for two finite additive costs and
+their trees. It keeps every non-dominated occurrence in original
+derivation order, including occurrences with equal scores or equal
+trees. Adding the same pair preserves strict dominance. A discarded
+child can therefore be replaced by one that strictly improves the
+parent score. A constructor that collapses distinct pairs can lose
+witnesses even when its score-only front is sound. Lean proves strict
+integer-pair translation and the separate canonical score-front theorem.
+The Rust ordered witness gate covers binary alignments through length
+three and a binary rule with repeated and distinct child ranks.
 
 `queries::within_delta` returns the finite additive score and tree for every
 root answer at most Δ above the optimum, including the boundary. Choose
@@ -131,7 +184,29 @@ its fixed integer weight plus its child scores. For pairs of integers,
 the Pareto theorem requires componentwise monotone constructors and a
 chooser that preserves the empty bag and returns exactly the front in a
 canonical order. Both equalities hold at every in-bounds rank.
-[Score-band and Pareto theorems](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.1.0/verification/BellmanFrontiers.lean)
+[Score-band and Pareto theorems](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.3.0/verification/BellmanFrontiers.lean)
+
+## Rule-label provenance
+
+Use `Provenance::new(label)` with `tabulate_cells`. Every inhabited
+rank returns a polynomial. Each term gives a sorted multiset of local
+labels and a positive coefficient that counts its derivations.
+For example, two occurrences with labels `x` and `y` in either order
+contribute `2xy`. A rule using the same child twice multiplies in
+that child's factors twice.
+
+Call `Polynomial::evaluate` with a commutative semiring and a weight
+function on labels. The same polynomial can answer derivation count,
+recognition, additive minimum or total weight. Use equal weights for
+equal labels, and include any required rule-site identity in the label.
+Projection preserves semiring addition and multiplication for a lawful
+`CommutativeSemiring`. The laws and stable per-label weights are caller
+obligations. A custom implementation with noncommutative multiplication
+can disagree with direct folding. For fallible arithmetic, equivalence
+requires both evaluations to succeed. Ordered enumeration, tree identity
+and general choice functions need their own algebras. Each monomial
+stores one label per constructor occurrence. Repeated child ranks can
+double the factor list at each level even with one term and one derivation.
 
 ## Distinct binary trees by semantic intersection
 

@@ -150,15 +150,34 @@ impl Additive {
     pub(crate) fn sum(
         self,
         weight: Cost,
-        mut costs: impl Iterator<Item = Cost> + Clone,
+        mut costs: impl Iterator<Item = Cost>,
     ) -> Result<Cost, Error> {
-        if weight == Cost::Infinity || costs.clone().any(|cost| cost == Cost::Infinity) {
-            return match self.policy {
-                CostPolicy::FiniteOnly => Err(Error::InfinityDisabled),
-                CostPolicy::AttainableInfinity => Ok(Cost::Infinity),
+        let Cost::Finite(mut total) = weight else {
+            return self.infinite();
+        };
+        while let Some(cost) = costs.next() {
+            let Cost::Finite(value) = cost else {
+                return self.infinite();
             };
+            let Some(next) = total.checked_add(value) else {
+                // An attainable infinity absorbs any finite prefix. The
+                // finite-only policy also diagnoses it before finite overflow.
+                return if costs.any(|rest| rest == Cost::Infinity) {
+                    self.infinite()
+                } else {
+                    Err(Error::Overflow)
+                };
+            };
+            total = next;
         }
-        costs.try_fold(weight, Cost::plus)
+        Ok(Cost::Finite(total))
+    }
+
+    fn infinite(self) -> Result<Cost, Error> {
+        match self.policy {
+            CostPolicy::FiniteOnly => Err(Error::InfinityDisabled),
+            CostPolicy::AttainableInfinity => Ok(Cost::Infinity),
+        }
     }
 }
 
@@ -343,6 +362,54 @@ pub fn pareto_min<L: Clone + Ord, R: Clone + Ord>(
         }
     }
     Ok(front)
+}
+
+/// Minimize two finite additive objectives and retain every non-dominated
+/// derivation, including ties and repeated trees, in derivation order.
+///
+/// Each constructor adds its fixed pair to the componentwise sum of the
+/// child pairs. Replacing a strictly dominated child strictly improves
+/// the parent when the other children are fixed. The Bellman argument
+/// assumes that every intermediate component sum fits in `i64`.
+pub struct ParetoWitnesses<F>(F);
+
+impl<F> ParetoWitnesses<F> {
+    pub fn new(cost: F) -> Self {
+        Self(cost)
+    }
+}
+
+impl<O, F> Algebra<O> for ParetoWitnesses<F>
+where
+    O: Clone + Eq + std::fmt::Debug,
+    F: Fn(&O) -> (i64, i64),
+{
+    type Value = crate::queries::RankedTree<O, (i64, i64)>;
+
+    fn apply(&self, operator: &O, children: &[&Self::Value]) -> Result<Self::Value, Error> {
+        let mut value = (self.0)(operator);
+        for child in children {
+            value.0 = value.0.checked_add(child.value.0).ok_or(Error::Overflow)?;
+            value.1 = value.1.checked_add(child.value.1).ok_or(Error::Overflow)?;
+        }
+        Ok(crate::queries::RankedTree {
+            value,
+            tree: Tree {
+                operator: operator.clone(),
+                children: children.iter().map(|child| child.tree.clone()).collect(),
+            },
+        })
+    }
+
+    fn choose(&self, candidates: &[Self::Value]) -> Result<Vec<Self::Value>, Error> {
+        let scores: Vec<_> = candidates.iter().map(|candidate| candidate.value).collect();
+        let front = pareto_min(&scores)?;
+        Ok(candidates
+            .iter()
+            .filter(|candidate| front.binary_search(&candidate.value).is_ok())
+            .cloned()
+            .collect())
+    }
 }
 
 /// Return every ordered derivation with finite additive cost at most
