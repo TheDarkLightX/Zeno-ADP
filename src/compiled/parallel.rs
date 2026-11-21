@@ -35,6 +35,10 @@ pub enum Layout<'a> {
 /// Multi-worker schedules can visit a later rank first. An unwind from a
 /// worker resumes with its original payload when the caller receives it.
 /// Closed-form schedules replay source rows on a returned error.
+///
+/// Bound programs from [`super::TokenGrammar`] and [`crate::mcfg::Grammar`]
+/// hold boxed callbacks that can capture non-`Sync` state. Evaluate those
+/// programs with [`super::tabulate`]. This includes the MCFG macro form.
 pub fn tabulate_parallel<G, A>(
     grammar: &G,
     algebra: &A,

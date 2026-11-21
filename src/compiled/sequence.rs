@@ -1,9 +1,9 @@
-use std::ops::Range;
+use std::ops::{Range, RangeInclusive};
 
 use crate::fast::RuleSource;
 use crate::{reserve_table, Cell, Error, Operator};
 
-use super::{sealed, ProductionSink, Program};
+use super::{sealed, ProductionSink, Program, SplitEnds};
 
 /// Index into a grammar's declared nonterminal names.
 pub type Nonterminal = usize;
@@ -92,6 +92,20 @@ pub struct TokenMatched<'a, const TRACKS: usize, T> {
     pub children: &'a [[Range<usize>; TRACKS]],
 }
 
+/// Input and coordinates available before a child split is enumerated.
+/// An end boundary (e) refers to the half-open span `start..e`.
+pub struct SplitContext<'a, const TRACKS: usize, T> {
+    pub inputs: [&'a [T]; TRACKS],
+    pub parent: &'a [Range<usize>; TRACKS],
+    pub rule: &'a str,
+    pub track: usize,
+    /// Child index in constructor argument order.
+    pub child: usize,
+    pub start: usize,
+}
+
+type SplitGuard<const TRACKS: usize, T> = dyn Fn(SplitContext<'_, TRACKS, T>) -> SplitEnds;
+
 /// Builds a constructor payload from one matched production occurrence.
 pub type SequenceConstructor<O, const TRACKS: usize, T = u8> =
     dyn Fn(TokenMatched<'_, TRACKS, T>) -> O;
@@ -112,6 +126,15 @@ pub struct TokenProduction<O, const TRACKS: usize, T, A = TokenAtom<T>> {
 /// order. Within a rule, splits are tried in increasing boundary order on
 /// each track, starting with track zero. Constructor children retain their
 /// declared order even when another track visits them in a different order.
+///
+/// Boxed callbacks may capture thread-local state. A bound token grammar
+/// uses [`super::tabulate`] for compiled evaluation.
+///
+/// ```compile_fail,E0277
+/// use zeno_adp::{compiled::Grammar, grammars::Align};
+/// fn requires_sync<T: Sync>() {}
+/// requires_sync::<Grammar<Align, 1>>();
+/// ```
 pub struct TokenGrammar<O, const TRACKS: usize, T, A = TokenAtom<T>> {
     root: Nonterminal,
     order: Vec<Nonterminal>,
@@ -120,12 +143,15 @@ pub struct TokenGrammar<O, const TRACKS: usize, T, A = TokenAtom<T>> {
     yields: Vec<[Option<usize>; TRACKS]>,
     nullable: Vec<bool>,
     positive: Vec<[bool; TRACKS]>,
+    span_limits: Option<Vec<[Option<usize>; TRACKS]>>,
+    split_guard: Option<Box<SplitGuard<TRACKS, T>>>,
 }
 
 struct Lowered<O, const TRACKS: usize, T, A> {
     definition: TokenProduction<O, TRACKS, T, A>,
     suffix_minima: [Vec<usize>; TRACKS],
     suffix_empty: [Vec<bool>; TRACKS],
+    suffix_maxima: Option<[Vec<usize>; TRACKS]>,
 }
 
 impl<O: Operator, const TRACKS: usize, T: Eq, A: TrackAtom<T>> TokenGrammar<O, TRACKS, T, A> {
@@ -223,6 +249,7 @@ impl<O: Operator, const TRACKS: usize, T: Eq, A: TrackAtom<T>> TokenGrammar<O, T
                 definition: rule,
                 suffix_minima,
                 suffix_empty,
+                suffix_maxima: None,
             });
         }
         Ok(Self {
@@ -233,7 +260,75 @@ impl<O: Operator, const TRACKS: usize, T: Eq, A: TrackAtom<T>> TokenGrammar<O, T
             yields,
             nullable,
             positive,
+            span_limits: None,
+            split_guard: None,
         })
+    }
+
+    /// Restrict a nonterminal's yields to the given inclusive maximum widths.
+    /// A `None` track has no added cap. Caps apply to roots and children,
+    /// and preserve logical ranks. An over-width cell has no productions.
+    /// These are grammar restrictions shared by every algebra and audit.
+    pub fn with_span_limits(
+        mut self,
+        nonterminal: Nonterminal,
+        maxima: [Option<usize>; TRACKS],
+    ) -> Result<Self, Error> {
+        if nonterminal >= self.order.len() {
+            return Err(Error::InvalidNonterminal(nonterminal));
+        }
+        let limits = self
+            .span_limits
+            .get_or_insert_with(|| vec![[None; TRACKS]; self.order.len()]);
+        limits[nonterminal] = maxima;
+        // The sums need only bound the length of an input slice. Saturation
+        // at usize::MAX preserves that upper bound.
+        for rule in self.rules.iter_mut().flatten() {
+            rule.suffix_maxima = Some(std::array::from_fn(|track| {
+                let atoms = &rule.definition.tracks[track];
+                let mut bounds = vec![0usize; atoms.len() + 1];
+                for (index, atom) in atoms.iter().enumerate().rev() {
+                    let width = atom.child().map_or(1, |child| {
+                        let nt = rule.definition.children[child];
+                        if self.positive[nt][track] {
+                            limits[nt][track].unwrap_or(usize::MAX)
+                        } else {
+                            0
+                        }
+                    });
+                    bounds[index] = bounds[index + 1].saturating_add(width);
+                }
+                bounds
+            }));
+        }
+        Ok(self)
+    }
+
+    /// Restrict each visited child split to an inclusive interval of absolute
+    /// end boundaries. `None` or an empty interval rejects that branch.
+    /// The interval intersects the grammar's structural bounds.
+    /// A guard must be deterministic and must depend only on its context.
+    /// It applies to child splits, including fixed and empty child spans.
+    /// Terminal-only clauses have no child split. A second call replaces
+    /// the guard.
+    pub fn with_split_guard(
+        self,
+        guard: impl Fn(SplitContext<'_, TRACKS, T>) -> Option<RangeInclusive<usize>> + 'static,
+    ) -> Self {
+        self.with_split_ends(move |context| guard(context).map(SplitEnds::from).unwrap_or_default())
+    }
+
+    /// Restrict each visited child split to a union of absolute inclusive end
+    /// intervals. An empty union rejects that branch. The matcher intersects
+    /// the union with its structural bounds and visits each eligible end once
+    /// in increasing order. The guard has the same scope and determinism
+    /// requirements as [Self::with_split_guard] and replaces any previous guard.
+    pub fn with_split_ends(
+        mut self,
+        guard: impl Fn(SplitContext<'_, TRACKS, T>) -> SplitEnds + 'static,
+    ) -> Self {
+        self.split_guard = Some(Box::new(guard));
+        self
     }
 
     /// Independent structural lower bounds by track. Each terminal
@@ -507,13 +602,21 @@ impl<O: Operator, const TRACKS: usize, T: Eq, A: TrackAtom<T>> TokenSequence<'_,
         Some((nonterminal, spans))
     }
 
-    fn emit_cell(
+    fn emit_cell<const CLIP: bool>(
         &self,
         cell: Cell,
         scratch: &mut MatchScratch<TRACKS>,
         mut emit: impl FnMut(&str, O, &[Cell]) -> Result<(), Error>,
     ) -> Result<(), Error> {
         let (nonterminal, spans) = self.cell(cell).ok_or(Error::CellOutOfRange(cell))?;
+        if self.grammar.span_limits.as_ref().is_some_and(|limits| {
+            spans
+                .iter()
+                .zip(limits[nonterminal])
+                .any(|(span, cap)| cap.is_some_and(|cap| span.len() > cap))
+        }) {
+            return Ok(());
+        }
         for rule in &self.grammar.rules[nonterminal] {
             if spans.iter().enumerate().any(|(track, span)| {
                 let len = span.len();
@@ -537,10 +640,32 @@ impl<O: Operator, const TRACKS: usize, T: Eq, A: TrackAtom<T>> TokenSequence<'_,
                 child_spans: &mut scratch.spans[..arity],
                 children: &mut scratch.children[..arity],
             };
-            matcher.visit(0, 0, spans[0].start, &mut |operator, children| {
+            matcher.visit::<CLIP>(0, 0, spans[0].start, &mut |operator, children| {
                 crate::validate_rule(cell, &operator, children)?;
                 emit(&rule.definition.name, operator, children)
             })?;
+        }
+        Ok(())
+    }
+
+    fn fill_for_sink<S: ProductionSink<O>>(&self, output: &mut S) -> Result<(), Error> {
+        if S::CLIP_SPLITS {
+            self.fill_cells::<true>(output)
+        } else {
+            self.fill_cells::<false>(output)
+        }
+    }
+
+    fn fill_cells<const CLIP: bool>(
+        &self,
+        output: &mut impl ProductionSink<O>,
+    ) -> Result<(), Error> {
+        let mut scratch = MatchScratch::default();
+        for cell in 0..self.cell_count {
+            self.emit_cell::<CLIP>(cell, &mut scratch, |site, op, children| {
+                output.rule_slice(site, op, children)
+            })?;
+            output.finish_cell()?;
         }
         Ok(())
     }
@@ -561,7 +686,7 @@ struct MatchRule<'a, 'input, O, const TRACKS: usize, T, A> {
 }
 
 impl<O: Operator, const TRACKS: usize, T: Eq, A: TrackAtom<T>> MatchRule<'_, '_, O, TRACKS, T, A> {
-    fn visit(
+    fn visit<const CLIP: bool>(
         &mut self,
         track: usize,
         atom: usize,
@@ -596,27 +721,62 @@ impl<O: Operator, const TRACKS: usize, T: Eq, A: TrackAtom<T>> MatchRule<'_, '_,
                 return Ok(());
             }
             let next = self.parent.get(track + 1).map_or(0, |span| span.start);
-            return self.visit(track + 1, 0, next, emit);
+            return self.visit::<CLIP>(track + 1, 0, next, emit);
         };
         match symbol.child() {
             Some(child) => {
                 let minimum = bounds[atom] - bounds[atom + 1];
                 let suffix_empty = self.rule.suffix_empty[track][atom + 1];
-                let child_positive =
-                    self.sequence.grammar.positive[self.rule.definition.children[child]][track];
+                let grammar = self.sequence.grammar;
+                let nt = self.rule.definition.children[child];
+                let child_positive = grammar.positive[nt][track];
                 let first = if suffix_empty { end } else { start + minimum };
                 let last = if child_positive {
                     end - bounds[atom + 1]
                 } else {
                     start
                 };
-                for split in first..=last {
+                let allowed_last = grammar
+                    .span_limits
+                    .as_ref()
+                    .and_then(|limits| limits[nt][track])
+                    .map_or(usize::MAX, |maximum| start.saturating_add(maximum));
+                let allowed = grammar.split_guard.as_ref().map_or_else(
+                    || SplitEnds::from(0..=usize::MAX),
+                    |guard| {
+                        guard(SplitContext {
+                            inputs: self.sequence.inputs,
+                            parent: self.parent,
+                            rule: &self.rule.definition.name,
+                            track,
+                            child,
+                            start,
+                        })
+                    },
+                );
+                let clipped_first = self.rule.suffix_maxima.as_ref().map_or(first, |maxima| {
+                    first.max(end.saturating_sub(maxima[track][atom + 1]))
+                });
+                let mut visit_split = |split| {
                     self.child_spans[child][track] = start..split;
-                    self.visit(track, atom + 1, split, emit)?;
+                    self.visit::<CLIP>(track, atom + 1, split, emit)
+                };
+                if CLIP {
+                    for split in allowed.clipped(clipped_first, last.min(allowed_last)) {
+                        visit_split(split)?;
+                    }
+                } else {
+                    for split in first..=last {
+                        if split <= allowed_last
+                            && allowed.ranges().iter().any(|r| r.contains(&split))
+                        {
+                            visit_split(split)?;
+                        }
+                    }
                 }
             }
             None if symbol.accepts(&self.sequence.inputs[track][start]) => {
-                self.visit(track, atom + 1, start + 1, emit)?;
+                self.visit::<CLIP>(track, atom + 1, start + 1, emit)?;
             }
             None => {}
         }
@@ -642,7 +802,7 @@ impl<O: Operator, const TRACKS: usize, T: Eq, A: TrackAtom<T>> RuleSource
         cell: Cell,
         mut emit: impl FnMut(O, &[Cell]) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        self.emit_cell(
+        self.emit_cell::<true>(
             cell,
             &mut MatchScratch::default(),
             |_, operator, children| emit(operator, children),
@@ -659,13 +819,6 @@ impl<O: Operator, const TRACKS: usize, T: Eq, A: TrackAtom<T>> Program
     for TokenSequence<'_, O, TRACKS, T, A>
 {
     fn fill(&self, output: &mut impl ProductionSink<O>) -> Result<(), Error> {
-        let mut scratch = MatchScratch::default();
-        for cell in 0..self.cell_count {
-            self.emit_cell(cell, &mut scratch, |site, op, children| {
-                output.rule_slice(site, op, children)
-            })?;
-            output.finish_cell()?;
-        }
-        Ok(())
+        self.fill_for_sink(output)
     }
 }

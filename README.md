@@ -4,7 +4,7 @@ Zeno-ADP is a Rust library for algebraic dynamic programming. A grammar
 builds candidate trees. Algebras ask questions about those trees, including
 the minimum or maximum score, counts, Pareto fronts and distributions over
 derivations. The query guide lists what each algebra counts and how to
-check its answers. [Query guide](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.4.0/docs/QUESTIONS.md)
+check its answers. [Query guide](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.5.0/docs/QUESTIONS.md)
 
 ## Installation
 
@@ -12,7 +12,7 @@ Add the crate to your application's `Cargo.toml`.
 
 ```toml
 [dependencies]
-zeno-adp = "0.4.0"
+zeno-adp = "0.5.0"
 ```
 
 ## Find the cheapest matrix parenthesization
@@ -50,14 +50,22 @@ reports the cell rank, occurrence ordinal, clause name, constructor
 payload and ordered child ranks. Use `compiled::tabulate_selected` for
 several answers from one algebra. Use `compiled::tabulate_joint` for
 two independent algebras with their own requested ranks.
-`compiled::tabulate_parallel` is experimental. In the eight-CPU benchmark
-of the scheduler, speedups at 2, 4 and 8 workers were 0.22×, 0.32× and
-0.37× for 3,000 × 3,000 alignment, and 1.28×, 1.99× and 2.33× for
-700-base Nussinov. The speedup divides one-worker time by elapsed time
-at the given worker count.
+Use `compiled::tabulate_with_budget` for a byte limit on table slots.
+It chooses dense storage when it fits and tries packed runs otherwise.
+Use `with_split_ends` to admit a union of child end ranges.
+
+`compiled::tabulate_parallel` is experimental. The eight-CPU benchmark
+used five runs per worker count. Speedups compare the median time to
+the one-worker median. Answers agreed at every worker count.
+
+| Workload | 2 workers | 4 workers | 8 workers |
+|---|---:|---:|---:|
+| Global alignment, 3,000 × 3,000 tokens | 0.23× | 0.32× | 0.40× |
+| Nussinov, 700 bases | 1.46× | 2.12× | 2.53× |
+
 [Compiler guide](docs/COMPILER.md) ·
-[Streaming and recovery](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.4.0/docs/FAST.md) ·
-[Forests, crossings and sets](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.4.0/docs/STRUCTURES.md)
+[Streaming and recovery](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.5.0/docs/FAST.md) ·
+[Forests, crossings and sets](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.5.0/docs/STRUCTURES.md)
 
 Build an alignment grammar from two ranked prefix grammars with
 `grammars::PrefixProduct`. For one minimum-cost unit alignment,
@@ -72,7 +80,7 @@ table, as does `first_minimum_tree`. Both rank in ascending score order
 and keep first derivation order for ties. `Count` counts occurrences.
 `Classes` lists distinct keys. `Classified` applies a question per key
 and may return several pairs per key.
-[Ranking contracts](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.4.0/docs/QUESTIONS.md#ranking-trees)
+[Ranking contracts](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.5.0/docs/QUESTIONS.md#ranking-trees)
 
 `ParetoWitnesses` retains every non-dominated derivation in order for two
 fixed additive costs with representable ordered sums. `Provenance`
@@ -129,16 +137,15 @@ operations on discarded branches and on every cell evaluated.
 Rust's reference table was finite checked against that specification on
 1,892 charts covering short folding, alignment, matrix-chain and knapsack
 inputs and a four-cell fixture. The audit guide gives the exact domains
-and five answers compared at each rank. [Audit guide](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.4.0/docs/AUDIT.md#verification-scope)
+and five answers compared at each rank. [Audit guide](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.5.0/docs/AUDIT.md#verification-scope)
 
 Run `cargo run --offline --locked --example matrix_chain` from the checkout.
-The other examples cover alignment, folding, knapsack, custom sequence and
-streaming grammars, structural grammars, weighted derivations, change-point detection and optimal binary search trees.
-[Examples](examples/)
+Run `cargo run --offline --locked --example cookbook` for 22 recipes
+with direct checks on raw inputs. [Cookbook](docs/COOKBOOK.md) · [Examples](examples/)
 
-[API documentation](https://docs.rs/zeno-adp/0.4.0/zeno_adp/) · [MIT license](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.4.0/LICENSE)
+[API documentation](https://docs.rs/zeno-adp/0.5.0/zeno_adp/) · [MIT license](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.5.0/LICENSE)
 
-See the changelog when upgrading from 0.3.0 or 0.1.0. [Changelog](CHANGELOG.md) · [Release 0.4.0](https://github.com/TheDarkLightX/Zeno-ADP/releases/tag/v0.4.0)
+See the changelog when upgrading from 0.4.0, 0.3.0 or 0.1.0. [Changelog](CHANGELOG.md) · [Release 0.5.0](https://github.com/TheDarkLightX/Zeno-ADP/releases/tag/v0.5.0)
 
 ## Acknowledgements
 

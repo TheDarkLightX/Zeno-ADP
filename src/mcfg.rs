@@ -62,6 +62,16 @@ pub struct Production<O> {
 /// Proper linear, nonerasing MCFG. Every component is nonempty and the
 /// start symbol has one component. Same-yield unary dependencies must be
 /// acyclic. Components are disjoint and may occur in any physical order.
+///
+/// Boxed constructors may capture thread-local state. Use
+/// [`crate::compiled::tabulate`] for compiled evaluation, including when a
+/// macro supplies the productions.
+///
+/// ```compile_fail,E0277
+/// use zeno_adp::{grammars::Align, mcfg::Grammar};
+/// fn requires_sync<T: Sync>() {}
+/// requires_sync::<Grammar<Align>>();
+/// ```
 pub struct Grammar<O> {
     start: Nonterminal,
     rules: Vec<Vec<Production<O>>>,

@@ -125,6 +125,14 @@ impl<V> Table<V> {
         &self.cells
     }
 
+    pub(crate) fn storage_bytes(&self) -> usize {
+        self.cells.capacity() * std::mem::size_of::<Option<V>>()
+    }
+
+    pub(crate) fn into_cells(self) -> Vec<Option<V>> {
+        self.cells
+    }
+
     pub fn root(&self) -> Cell {
         self.root
     }

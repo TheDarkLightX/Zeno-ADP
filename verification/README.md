@@ -37,6 +37,15 @@ gives the stride subtraction at an enabled mixed-radix step.
 `TrackRanks.predecessor_descends` gives strict descent when the lag is
 positive. These are natural-number rank formulas. The Rust grids separately
 check layout binding and emitted child ranks.
+`CompiledQueries.lean` checks logical lookup after packing absent slots
+away, ordered inclusive split clipping, and a marked-slot mass identity
+over natural-number products. The Rust gates check the run index, replay
+rows and inside–outside observations separately.
+`Admission.lean` proves membership preservation for clipping a coalesced
+pair of natural-number intervals and strict ordering for clipped ends
+from separated intervals. Its three layout theorems characterize dense,
+packed and refusal outcomes for supplied byte totals. The Rust capacity
+and ordered union tests exercise the implementations separately.
 `Wavefront.lean` proves that coordinate predecessors lie in an earlier
 tile wave or the same tile, where row-major rank descends. It also proves
 length descent for generated pivots and Nussinov children. The Rust tests
@@ -70,6 +79,12 @@ ranking equation, the equal-copy crossing language, and existence and
 uniqueness of the pivot block of a pairwise disjoint cover. The Rust
 structural grammar gates compare each chart cell against independent
 projected forests, string slices and restricted-growth set partitions.
+
+`Growth.lean` proves that ordered Cartesian expansion preserves the pair
+of derivation count and summed constructor-node count under the displayed
+summary operation. The model uses unbounded natural numbers. The Rust
+fixture checks the budgeted summary against complete tree enumeration
+on short charts, including empty bags and repeated child positions.
 
 The exact model uses natural counts, integer weights, and optional infinite
 scores. An empty cell has an empty answer bag. A cell with an infinite

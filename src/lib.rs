@@ -20,8 +20,8 @@ pub mod queries;
 pub mod sets;
 
 pub use audit::{
-    audit, audit_bounded, audit_bounded_classified, Ambiguity, AnswerOrder, Audit, AuditBudget,
-    BoundedAudit, Counterexample, Law,
+    audit, audit_bounded, audit_bounded_classified, grammar_growth, Ambiguity, AnswerOrder, Audit,
+    AuditBudget, BoundedAudit, Counterexample, Expansion, GrammarGrowth, Law,
 };
 
 use std::collections::BTreeMap;
@@ -33,8 +33,12 @@ pub type Cell = usize;
 pub enum Error {
     MissingRoot(Cell),
     CellOutOfRange(Cell),
-    /// The requested dense table layout cannot be reserved.
+    /// Table storage could not be reserved.
     AllocationFailed,
+    /// Neither compiled table layout fits within the caller's slot byte budget.
+    TableBudgetExceeded {
+        max_bytes: usize,
+    },
     NonDescendingChild {
         cell: Cell,
         child: Cell,
@@ -73,6 +77,10 @@ impl std::fmt::Display for Error {
             Self::MissingRoot(cell) => write!(f, "root cell {cell} does not exist"),
             Self::CellOutOfRange(cell) => write!(f, "cell rank {cell} is out of range"),
             Self::AllocationFailed => write!(f, "could not reserve table storage"),
+            Self::TableBudgetExceeded { max_bytes } => write!(
+                f,
+                "neither dense nor packed table storage fits in {max_bytes} bytes"
+            ),
             Self::NonDescendingChild { cell, child } => {
                 write!(f, "child {child} must precede cell {cell}")
             }
@@ -108,7 +116,7 @@ impl std::fmt::Display for Error {
                 )
             }
             Self::AuditEvaluation { cell, law, source } => {
-                write!(f, "audit stopped at cell {cell}, {law:?}: {source}")
+                write!(f, "audit stopped at cell {cell} while {law}. {source}")
             }
             Self::Overflow => write!(f, "arithmetic overflow"),
         }

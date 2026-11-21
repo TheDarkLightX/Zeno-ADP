@@ -89,6 +89,7 @@ fn alignment_and_interval_waves_match_reference_cells() {
             let chart = grammars::alignment(word, other).unwrap();
             let alignment = grammars::alignment_source(word, other).unwrap();
             alignment_cells += compare(&alignment, &chart, &Additive::default());
+            alignment_cells += compare(&alignment, &chart, &Count);
         }
     }
     println!("small waves: {interval_cells} interval and {alignment_cells} alignment comparisons");

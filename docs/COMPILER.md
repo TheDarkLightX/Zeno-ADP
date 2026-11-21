@@ -173,6 +173,27 @@ keeps each parent's declared alternative order.
 Every logical cell retains its rank for inspection. The number of span tuples is
 the product of the tracks’ interval counts, including zero-length intervals.
 
+Use `with_span_limits(nonterminal, maxima)` to cap a nonterminal's width
+on each track. A cap restricts parent and child spans, including the root.
+`None` leaves a track uncapped. Use `with_split_guard` for an
+input-dependent restriction on a child. Its context gives the original
+input, parent spans, clause name, track, child index in constructor order
+and current start. Return an inclusive interval of permitted absolute
+ends for the half-open child span. An empty interval or `None` rejects
+the split. For a fixed end, return `Some(end..=end)`. Use
+`with_split_ends` for several ranges. For example,
+`SplitEnds::new([0..=0, 2..=2])` admits ends zero and two. Construction
+discards empty ranges, sorts by start, and merges adjacent or
+overlapping ranges. An empty union rejects the split.
+
+Guards must be deterministic and apply even to forced boundaries and
+empty children. Construction checks grammar dependencies before any
+added caps or guards. The reference chart post-filters structural
+candidates by membership. Compiled evaluation intersects each admitted
+range with the structural bounds and visits each end once in ascending
+order. Changing the admitted ends can change counts, ordered candidates
+and normalized weights.
+
 Ranked layouts outside the sequence declaration model can use
 `fast::RuleSource` with `fast::tabulate`, or `fast::reference_chart` and the
 reference engine. The five built-ins bring their own ranked schedules.
@@ -186,6 +207,32 @@ allocating track offsets. Count overflow returns `Error::Overflow`.
 An offset reservation failure returns `Error::AllocationFailed`.
 Binding a source computes its logical layout and can succeed when a
 particular dense table cannot be reserved.
+
+### Packed summaries
+
+`compiled::tabulate_compact` fills every logical rank and packs the
+inhabited summaries into contiguous runs. Each run costs two indices.
+Use `get(rank)` for logical lookup and `stored_cells()` and `run_count()`
+to inspect the layout. An inhabited zero occupies a slot. Empty cells
+have no value slot. Storage is reserved as the packed table grows.
+Dense `tabulate` provides constant-time access, and packed lookup may
+search run starts. Selected and joint tables are available when you
+need only particular outputs. Tree recovery uses the existing dense
+score table. Use `compiled::reference_chart` for audits.
+
+When you have a byte limit for table slots, call
+`compiled::tabulate_with_budget(program, algebra, max_bytes)`. The
+result exposes logical rank lookup regardless of the chosen layout.
+Dense storage is preferred whenever it fits. Otherwise the packed
+fill checks capacity as it reserves values and run indices.
+`storage_bytes()` reports the returned vector capacities multiplied by
+their slot sizes. A slot includes inline padding. The budget excludes
+allocator overhead, transient reallocation, evaluation scratch, the
+grammar and any heap allocations owned by a value. When neither layout
+fits, the call returns `Error::TableBudgetExceeded`. Reservation failure
+within the budget returns `Error::AllocationFailed`. Packed budgeted
+fills request exact slot counts, so they may reserve more often than
+the explicit compact fill.
 
 ## Questions and backtracking
 
@@ -277,14 +324,25 @@ layout and worker count.
 Other programs replay to discover dependency levels before evaluation.
 A wave with one task runs on the caller.
 
+Parallel filling requires the bound program to implement `Sync`. The
+contiguous `compiled::Grammar` and `TokenGrammar` hold boxed callbacks
+that can capture thread-local state. The same applies to `mcfg::Grammar`,
+including the grammar built by the MCFG macro. Use `compiled::tabulate`
+for these bound programs. Generated prefix and interval schedules can
+use `tabulate_parallel` when their inputs and callbacks are shareable.
+
 The scoped-worker scheduler was benchmarked on eight CPUs of an AMD
 Threadripper 1950X. Each speedup divides the median one-worker time by
 the median time at that worker count, using five runs per count.
 
-| Workload | 2 workers | 4 workers | 8 workers |
-|---|---:|---:|---:|
-| Global alignment, 3,000 × 3,000 tokens | 0.22× | 0.32× | 0.37× |
-| Nussinov, 700 bases | 1.28× | 1.99× | 2.33× |
+| Workload | 1 worker | 2 workers | 4 workers | 8 workers |
+|---|---:|---:|---:|---:|
+| Global alignment, 3,000 × 3,000 tokens | 0.167 s | 0.725 s (0.23×) | 0.524 s (0.32×) | 0.416 s (0.40×) |
+| Nussinov, 700 bases | 0.309 s | 0.212 s (1.46×) | 0.146 s (2.12×) | 0.122 s (2.53×) |
+
+Parallel filling remains experimental. Answers agreed at every worker
+count. One worker was faster on global alignment at all three measured
+worker counts.
 
 The sequence matcher reuses its child-span and rank buffers for a schedule
 traversal. The largest matched constructor arity bounds the buffer

@@ -62,6 +62,18 @@ outside value. For a positive partition, inside times outside divided by
 the partition gives the expected number of occurrences of a cell. That
 number can exceed one.
 
+For a compiled grammar, `compiled::inside_outside` fills inside weights
+and revisits rules in descending parent-rank order. It retains two weight
+tables. `weights()` exposes the same observations as the chart pass.
+`rule_mass(rank, ordinal)` returns a production occurrence's unnormalized
+weight. The ordinal is its zero-based position in the ordered replay
+row. `event_mass` sums over a predicate on ranked occurrences, including
+clause names. `expected_visits` divides that sum by the partition and
+returns `None` when the partition is zero. A derivation using two
+matched occurrences contributes twice, so this statistic can exceed one.
+For approximate tables use `compiled::log_inside_outside`. For audits use
+the explicit reference chart and exact algebra.
+
 `ExactSampler::new` prepares conditional branch probabilities from the
 inside table. `sample` chooses a rule proportional to its inside contribution
 and independently descends into each child position. Supply a callback
@@ -184,7 +196,7 @@ its fixed integer weight plus its child scores. For pairs of integers,
 the Pareto theorem requires componentwise monotone constructors and a
 chooser that preserves the empty bag and returns exactly the front in a
 canonical order. Both equalities hold at every in-bounds rank.
-[Score-band and Pareto theorems](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.4.0/verification/BellmanFrontiers.lean)
+[Score-band and Pareto theorems](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.5.0/verification/BellmanFrontiers.lean)
 
 ## Rule-label provenance
 

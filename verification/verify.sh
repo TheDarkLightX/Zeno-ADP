@@ -16,7 +16,7 @@ readonly lean_bin="${LEAN_BIN:-lean}"
 readonly rust_version="${RUST_VERSION:-1.87.0}"
 
 "$lean_bin" --version
-for module in BellmanTabulation IntervalConvolution BellmanBag BellmanAlgebras BellmanLexicographic Instances BellmanProbability BellmanExpectation BellmanFrontiers DistinctIntersections Structures GeneratedRanks TrackRanks JointRetention ProductProvenance Wavefront ChildSequence; do
+for module in BellmanTabulation IntervalConvolution BellmanBag BellmanAlgebras BellmanLexicographic Instances BellmanProbability BellmanExpectation BellmanFrontiers DistinctIntersections Structures GeneratedRanks TrackRanks JointRetention ProductProvenance Wavefront ChildSequence CompiledQueries Growth Admission; do
     "$lean_bin" -DwarningAsError=true -o "$LEAN_PATH/$module.olean" "verification/$module.lean"
 done
 cargo "+$rust_version" build --offline --locked --lib

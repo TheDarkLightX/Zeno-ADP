@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.5.0
+
+- Pack inhabited summaries by logical rank with `compiled::tabulate_compact`.
+  Use `compiled::tabulate_with_budget` to select a layout under a caller
+  limit on table slot bytes.
+- Bound compiled sequence splits with per-track span caps and input-aware
+  end intervals or interval unions. Each allowed end is visited once.
+- Compute compiled inside and outside weights without retaining production
+  rows. Query exact weighted rule occurrences and expected event visits.
+- Run 22 cookbook recipes with direct checks on the raw inputs.
+- Inspect chart growth with `grammar_growth` and print readable audit
+  verdicts, Bellman counterexamples and ambiguity witnesses.
+
+### Upgrading from 0.4.0
+
+- Set the dependency version to `0.5.0`. Existing dense tables and grammar
+  entry points still work. To set a slot budget, use
+  `compiled::tabulate_with_budget` and read the result by logical rank.
+- Exhaustive matches on `Error` can handle the new `TableBudgetExceeded`
+  variant. If you surface audit errors, use their fields for structured
+  information. The display text now describes the rank and failed law.
+- If you add span limits or split guards to an existing grammar, check
+  how the restricted candidates change counts and weights. Run the
+  Bellman audit with `compiled::reference_chart`.
+- Parallel filling remains experimental. The compiler guide lists
+  timings and the `Sync` requirements for bound grammars.
+
 ## 0.4.0
 
 - Generate ordered schedules for forest edit and alignment, proper linear

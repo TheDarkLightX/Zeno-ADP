@@ -169,6 +169,11 @@ fn check_modes(
     }
     check_table(fast::tabulate(program, &ObserveChildren).unwrap());
     check_table(compiled::tabulate(program, &ObserveChildren).unwrap());
+    let packed = compiled::tabulate_compact(program, &ObserveChildren).unwrap();
+    assert_eq!(packed.root(), chart.root());
+    for (rank, expected) in reference.iter().enumerate() {
+        assert_eq!(packed.get(rank), expected.as_ref());
+    }
     for workers in WORKERS {
         check_table(
             compiled::tabulate_parallel(
@@ -359,6 +364,7 @@ fn malformed_external_rows_are_rejected_at_the_emission_boundary() {
         let source = bind(NAME, [&[]], row).unwrap();
         let rejected = |error| assert_eq!(error, Some(expected.clone()));
         rejected(compiled::tabulate(&source, &Count).err());
+        rejected(compiled::tabulate_compact(&source, &Count).err());
         rejected(source.rules_at(0, |_, _| Ok(())).err());
         rejected(compiled::replay(&source, |_, _, _, _, _| Ok(())).err());
         rejected(compiled::reference_chart(&source).err());

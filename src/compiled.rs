@@ -1,19 +1,24 @@
 //! Ordered production schedules, table filling and replay for ranked grammars.
 
+mod compact;
 #[doc(hidden)]
 pub mod generated;
 mod grammar_macro;
 mod parallel;
 mod selection;
 mod sequence;
+mod split;
 
+pub use crate::probability::ranked::{inside_outside, log_inside_outside, CompiledInsideOutside};
+pub use compact::{tabulate_compact, tabulate_with_budget, BudgetedTable, CompactTable};
 pub use parallel::tabulate_parallel;
 pub(crate) use parallel::Layout as ParallelLayout;
 pub use selection::{tabulate_joint, tabulate_root, tabulate_selected, JointSelection, Selection};
 pub use sequence::{
-    Atom, Grammar, Matched, Nonterminal, Production, Sequence, SequenceConstructor, TokenAtom,
-    TokenGrammar, TokenMatched, TokenProduction, TokenSequence,
+    Atom, Grammar, Matched, Nonterminal, Production, Sequence, SequenceConstructor, SplitContext,
+    TokenAtom, TokenGrammar, TokenMatched, TokenProduction, TokenSequence,
 };
+pub use split::SplitEnds;
 
 use crate::algebras::{Additive, ScoredOperator};
 use crate::fast::{BestTable, Fold, RuleSource, Table};
@@ -22,6 +27,10 @@ use crate::{reserve_table, Cell, Chart, Error, Rule};
 
 #[doc(hidden)]
 pub trait ProductionSink<O> {
+    // Reference chart replay visits structural candidates and post-filters them.
+    #[doc(hidden)]
+    const CLIP_SPLITS: bool = true;
+
     fn rule<const N: usize>(
         &mut self,
         site: &str,
@@ -83,7 +92,7 @@ pub fn replay<G: Program>(
     grammar: &G,
     visit: impl FnMut(Cell, usize, &str, G::Op, &[Cell]) -> Result<(), Error>,
 ) -> Result<(), Error> {
-    let mut sink = Replay {
+    let mut sink = Replay::<_, true> {
         cell: 0,
         ordinal: 0,
         visit,
@@ -91,16 +100,18 @@ pub fn replay<G: Program>(
     grammar.fill(&mut sink)
 }
 
-struct Replay<F> {
+struct Replay<F, const CLIP: bool> {
     cell: Cell,
     ordinal: usize,
     visit: F,
 }
 
-impl<O, F> ProductionSink<O> for Replay<F>
+impl<O, F, const CLIP: bool> ProductionSink<O> for Replay<F, CLIP>
 where
     F: FnMut(Cell, usize, &str, O, &[Cell]) -> Result<(), Error>,
 {
+    const CLIP_SPLITS: bool = CLIP;
+
     fn rule_slice(&mut self, site: &str, operator: O, children: &[Cell]) -> Result<(), Error> {
         (self.visit)(self.cell, self.ordinal, site, operator, children)?;
         self.ordinal += 1;
@@ -118,10 +129,15 @@ where
 pub fn reference_chart<G: Program>(grammar: &G) -> Result<Chart<G::Op>, Error> {
     let mut cells = reserve_table(grammar.cell_count())?;
     cells.resize_with(grammar.cell_count(), Vec::new);
-    replay(grammar, |cell, _, _, operator, children| {
-        cells[cell].push(Rule::new(operator, children));
-        Ok(())
-    })?;
+    let mut sink = Replay::<_, false> {
+        cell: 0,
+        ordinal: 0,
+        visit: |cell: Cell, _, _: &str, operator, children: &[Cell]| {
+            cells[cell].push(Rule::new(operator, children));
+            Ok(())
+        },
+    };
+    grammar.fill(&mut sink)?;
     Chart::new(cells, grammar.root())
 }
 
@@ -131,27 +147,62 @@ pub fn tabulate<G: Program, A: Fold<G::Op>>(
     grammar: &G,
     algebra: &A,
 ) -> Result<Table<A::Value>, Error> {
-    let mut sink = Tabulation {
-        cells: reserve_table(grammar.cell_count())?,
+    fill_dense(grammar, algebra, reserve_table(grammar.cell_count())?)
+}
+
+fn fill_dense<G: Program, A: Fold<G::Op>>(
+    grammar: &G,
+    algebra: &A,
+    cells: Vec<Option<A::Value>>,
+) -> Result<Table<A::Value>, Error> {
+    let sink = Tabulation {
+        cells,
         chosen: Ok(None),
         algebra,
     };
+    Ok(Table::new(fill_table(grammar, sink)?, grammar.root()))
+}
+
+fn fill_table<G, A, S>(grammar: &G, mut sink: Tabulation<'_, A::Value, A, S>) -> Result<S, Error>
+where
+    G: Program,
+    A: Fold<G::Op>,
+    S: CellStore<A::Value>,
+{
     if let Err(error) = grammar.fill(&mut sink) {
         // Reference evaluation constructs and validates the entire chart first.
         // On a failed fast path, check the source before returning an algebra error.
         replay(grammar, |_, _, _, _, _| Ok(()))?;
         return Err(error);
     }
-    Ok(Table::new(sink.cells, grammar.root()))
+    Ok(sink.cells)
 }
 
-struct Tabulation<'a, V, A> {
-    cells: Vec<Option<V>>,
+trait CellStore<V> {
+    fn get(&self, cell: Cell) -> Option<&V>;
+    fn push(&mut self, value: Option<V>) -> Result<(), Error>;
+}
+
+impl<V> CellStore<V> for Vec<Option<V>> {
+    #[inline]
+    fn get(&self, cell: Cell) -> Option<&V> {
+        self[cell].as_ref()
+    }
+
+    #[inline]
+    fn push(&mut self, value: Option<V>) -> Result<(), Error> {
+        self.push(value);
+        Ok(())
+    }
+}
+
+struct Tabulation<'a, V, A, S> {
+    cells: S,
     chosen: Result<Option<V>, Error>,
     algebra: &'a A,
 }
 
-impl<O, A: Fold<O>> ProductionSink<O> for Tabulation<'_, A::Value, A> {
+impl<O, A: Fold<O>, S: CellStore<A::Value>> ProductionSink<O> for Tabulation<'_, A::Value, A, S> {
     #[inline]
     fn rule<const N: usize>(
         &mut self,
@@ -169,7 +220,7 @@ impl<O, A: Fold<O>> ProductionSink<O> for Tabulation<'_, A::Value, A> {
                 std::iter::empty(),
             ),
             [child] => {
-                if let Some(value) = self.cells[*child].as_ref() {
+                if let Some(value) = self.cells.get(*child) {
                     crate::fast::fold_present(
                         self.algebra,
                         &mut self.chosen,
@@ -180,7 +231,7 @@ impl<O, A: Fold<O>> ProductionSink<O> for Tabulation<'_, A::Value, A> {
                 Ok(())
             }
             [left, right] => {
-                if let (Some(left), Some(right)) = (&self.cells[*left], &self.cells[*right]) {
+                if let (Some(left), Some(right)) = (self.cells.get(*left), self.cells.get(*right)) {
                     crate::fast::fold_present(
                         self.algebra,
                         &mut self.chosen,
@@ -200,15 +251,14 @@ impl<O, A: Fold<O>> ProductionSink<O> for Tabulation<'_, A::Value, A> {
             self.algebra,
             &mut self.chosen,
             &operator,
-            children.iter().map(|&child| self.cells[child].as_ref()),
+            children.iter().map(|&child| self.cells.get(child)),
         )
     }
 
     #[inline]
     fn finish_cell(&mut self) -> Result<(), Error> {
         self.cells
-            .push(std::mem::replace(&mut self.chosen, Ok(None))?);
-        Ok(())
+            .push(std::mem::replace(&mut self.chosen, Ok(None))?)
     }
 }
 

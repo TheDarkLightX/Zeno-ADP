@@ -103,6 +103,29 @@ Ordered comparisons are the default. Use `AnswerOrder::Unordered` only when your
 records Bellman agreement for the supplied chart, algebra, arithmetic,
 choice and equality. Inspect `report.ambiguities` separately. Establish separately that your grammar generates the intended candidates. Test any representation or input change on its own scope. The size budget charges the number of constructor nodes across all raw derivations in all cells before expansion. It is a structural budget. Choose inputs and limits appropriate for the cost of your algebra, the available memory and the size of intermediate answers. `AuditBudgetExceeded` and `AuditEvaluation` signal an incomplete check.
 
+## Reading chart growth and audit reports
+
+Call `grammar_growth(&chart, budget)` before expanding trees. It counts
+the concrete chart's cells, rules and child positions, including repeated
+child positions and cells unreachable from the root. It uses the audit's
+structural preflight to return the exact number of constructor occurrences
+or the first cell where the total crosses your budget. It invokes no algebra.
+
+Try the same grammar at several input sizes and compare both counts. For
+a chain of `n` matrices, the chart has `n(n+1)/2` cells and
+`n + (n-1)n(n+1)/6` rules. Each split has two child positions.
+Exhaustive expansion grows faster because every split combines all
+parenthesizations on both sides. The count covers the supplied chart.
+Algebra work and the size of its values depend on the question.
+
+Use `println!("{report}")` to print a bounded audit. Bellman comparison
+and repeated identity each get their own verdict. A failure names the
+cell, the check that disagreed, and the before and after answer bags.
+An ambiguity names the cell, multiplicity and two derivation indices.
+Cell ranks, rule indices and derivation indices start at zero. The typed
+`first_failure` and `ambiguities` fields give complete witness trees,
+and each duplicate also carries its identity key.
+
 ## Verification scope
 
 For a finite ranked chart with total operations, equality of the tabulated
@@ -111,7 +134,7 @@ Bellman laws hold there. Three sufficient conditions are that choice
 preserves the empty bag, choosing each of two bags before merging them
 preserves the final choice, and choosing each child's bag before applying
 a constructor preserves the final choice over its results.
-[Tabulation theorem and premises](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.4.0/verification/BellmanTabulation.lean)
+[Tabulation theorem and premises](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.5.0/verification/BellmanTabulation.lean)
 
 The Rust reference table was finite checked against the mathematical table
 after grammar emission on the following domains. Length bounds include
@@ -132,4 +155,4 @@ total counts, and lexicographic minimum. Enumeration replaced distinct
 constructor payloads with IDs. Lexicographic minimum used a secondary
 additive cost derived from the ID and omitted infinite-weight rules.
 For a new grammar or algebra, run the bounded audit on its own inputs.
-[Verification sources](https://github.com/TheDarkLightX/Zeno-ADP/tree/v0.4.0/verification)
+[Verification sources](https://github.com/TheDarkLightX/Zeno-ADP/tree/v0.5.0/verification)

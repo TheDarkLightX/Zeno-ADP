@@ -1,3 +1,5 @@
+use std::fmt::{self, Debug, Display, Formatter};
+
 use crate::classification::{Classes, Classification};
 use crate::{
     build_trees, evaluate_tree, first_duplicate, rule_values, tabulate_with, Algebra, Cell, Chart,
@@ -35,6 +37,21 @@ pub enum Law {
     Injectivity,
 }
 
+impl Display for Law {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyChoice => f.write_str("choosing from no candidates"),
+            Self::Operation { rule } => write!(f, "choosing children before applying rule {rule}"),
+            Self::Merge => f.write_str("choosing within each rule before merging alternatives"),
+            Self::MergeAfterChildChoice => {
+                f.write_str("choosing within each rule before merging, after child choice")
+            }
+            Self::Tabulation => f.write_str("comparing exhaustive and tabulated answers"),
+            Self::Injectivity => f.write_str("computing answer identity"),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct Counterexample<O, V> {
     pub cell: Cell,
@@ -69,6 +86,130 @@ pub struct BoundedAudit<O, V, K = Tree<O>> {
     /// The first duplicate by identity key ordering in each ambiguous cell.
     pub ambiguities: Vec<Ambiguity<O, K>>,
     pub tree_nodes: usize,
+}
+
+fn plural_suffix(count: usize) -> &'static str {
+    if count == 1 {
+        ""
+    } else {
+        "s"
+    }
+}
+
+impl<O: Debug, V: Debug> Display for Counterexample<O, V> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "Cell {} differs when {}", self.cell, self.law)?;
+        if let Some(operator) = &self.operator {
+            write!(f, " ({operator:?})")?;
+        }
+        write!(
+            f,
+            ". Expected {:?}, got {:?}. The report retains {} original derivation occurrence{}.",
+            self.before,
+            self.after,
+            self.trees.len(),
+            plural_suffix(self.trees.len())
+        )
+    }
+}
+
+impl<O: Debug, V: Debug> Display for Audit<O, V> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Bellman check across {} cell{} and {} rule{}. ",
+            self.cells,
+            plural_suffix(self.cells),
+            self.rules,
+            plural_suffix(self.rules)
+        )?;
+        match &self.first_failure {
+            Some(failure) => Display::fmt(failure, f),
+            None => f.write_str("All comparisons agreed on this chart."),
+        }
+    }
+}
+
+impl<O: Debug, K> Display for Ambiguity<O, K> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let d = &self.duplicate;
+        write!(
+            f,
+            "Cell {} has {} derivations with the same answer identity. Witness derivations {} and {} start with {:?} and {:?}.",
+            self.cell, d.occurrences, d.indices[0], d.indices[1], d.first.operator, d.second.operator,
+        )
+    }
+}
+
+impl<O: Debug, V: Debug, K> Display for BoundedAudit<O, V, K> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} Examined {} constructor node{}. Repeated answer identities occur in {} cell{}.",
+            self.bellman,
+            self.tree_nodes,
+            plural_suffix(self.tree_nodes),
+            self.ambiguities.len(),
+            plural_suffix(self.ambiguities.len())
+        )?;
+        if let Some(first) = self.ambiguities.first() {
+            write!(f, " {first}")?;
+        }
+        Ok(())
+    }
+}
+
+/// The constructor occurrences needed to enumerate every derivation at
+/// every rank, including ranks unreachable from the root.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Expansion {
+    /// Exact total within the caller's structural budget.
+    WithinBudget { tree_nodes: usize },
+    /// The aggregate first crosses the budget at this rank.
+    OverBudget {
+        first_cell: Cell,
+        max_tree_nodes: usize,
+    },
+}
+
+/// Concrete grammar size for one bound input and the resulting audit work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GrammarGrowth {
+    pub cells: usize,
+    pub rules: usize,
+    /// Counts repeated child positions separately.
+    pub child_slots: usize,
+    pub expansion: Expansion,
+}
+
+impl Display for GrammarGrowth {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "This chart has {} cell{}, {} rule{} and {} child position{}. ",
+            self.cells,
+            plural_suffix(self.cells),
+            self.rules,
+            plural_suffix(self.rules),
+            self.child_slots,
+            plural_suffix(self.child_slots),
+        )?;
+        match self.expansion {
+            Expansion::WithinBudget { tree_nodes } => {
+                write!(
+                    f,
+                    "Exhaustive expansion accounts for {tree_nodes} constructor node{}.",
+                    plural_suffix(tree_nodes)
+                )
+            }
+            Expansion::OverBudget {
+                first_cell,
+                max_tree_nodes,
+            } => {
+                write!(f, "Exhaustive expansion crosses the {max_tree_nodes}-node budget at cell {first_cell}.")
+            }
+        }
+    }
 }
 
 fn same_answers<V: Eq>(before: &[V], after: &[V], order: AnswerOrder) -> bool {
@@ -224,7 +365,7 @@ pub fn audit<O: Clone, A: Algebra<O>>(
 }
 
 fn count_tree_nodes<O>(chart: &Chart<O>, budget: AuditBudget) -> Result<usize, Error> {
-    let mut totals = Vec::<(usize, usize)>::with_capacity(chart.cells.len());
+    let mut totals = crate::reserve_table::<(usize, usize)>(chart.cells.len())?;
     let mut aggregate = 0usize;
     for (cell, rules) in chart.cells.iter().enumerate() {
         let exceeded = || Error::AuditBudgetExceeded {
@@ -260,6 +401,40 @@ fn count_tree_nodes<O>(chart: &Chart<O>, budget: AuditBudget) -> Result<usize, E
         totals.push((derivations, nodes));
     }
     Ok(aggregate)
+}
+
+/// Count ranked rules and child positions and check exhaustive expansion
+/// against the budget using the same structural preflight as [`audit_bounded`].
+/// This reads the reference chart without constructing any trees or running
+/// an algebra. Compare reports over input sizes to measure concrete growth.
+pub fn grammar_growth<O>(chart: &Chart<O>, budget: AuditBudget) -> Result<GrammarGrowth, Error> {
+    let expansion = match count_tree_nodes(chart, budget) {
+        Ok(tree_nodes) => Expansion::WithinBudget { tree_nodes },
+        Err(Error::AuditBudgetExceeded {
+            cell,
+            max_tree_nodes,
+        }) => Expansion::OverBudget {
+            first_cell: cell,
+            max_tree_nodes,
+        },
+        Err(error) => return Err(error),
+    };
+    let mut rules = 0_usize;
+    let mut child_slots = 0_usize;
+    for cell in chart.cells() {
+        rules = rules.checked_add(cell.len()).ok_or(Error::Overflow)?;
+        for rule in cell {
+            child_slots = child_slots
+                .checked_add(rule.children.len())
+                .ok_or(Error::Overflow)?;
+        }
+    }
+    Ok(GrammarGrowth {
+        cells: chart.cells().len(),
+        rules,
+        child_slots,
+        expansion,
+    })
 }
 
 /// Exhaustively compare production, alternative-merge and table answers on

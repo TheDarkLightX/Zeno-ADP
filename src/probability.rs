@@ -7,6 +7,7 @@
 
 mod big;
 mod expectation;
+pub(crate) mod ranked;
 mod rational;
 mod sampling;
 
@@ -251,48 +252,14 @@ fn inside_outside_with<O: WeightedOperator, M: Mass>(
             continue;
         }
         for rule in rules {
-            let Some((&last, earlier)) = rule.children.split_last() else {
-                continue;
-            };
-            let weight = M::from_rational(rule.operator.weight());
-            if weight == M::ZERO {
-                continue;
-            }
-            // Two zero siblings make every position's contribution zero.
-            // With one zero, only the hole in that position contributes.
-            let mut zero_slots = rule
-                .children
-                .iter()
-                .enumerate()
-                .filter(|&(_, &child)| inside[child] == M::ZERO);
-            if let Some((hole, &child)) = zero_slots.next() {
-                if zero_slots.next().is_none() {
-                    let context = outside[cell].mul(weight)?;
-                    let contribution = M::product(
-                        context,
-                        rule.children
-                            .iter()
-                            .enumerate()
-                            .filter(|&(slot, _)| slot != hole)
-                            .map(|(_, &sibling)| inside[sibling]),
-                    )?;
-                    outside[child] = outside[child].add(contribution)?;
-                }
-                continue;
-            }
-            let mut prefix = outside[cell].mul(weight)?;
-            suffix.clear();
-            let mut tail = M::ONE;
-            for &child in rule.children.iter().skip(1).rev() {
-                tail = inside[child].mul(tail)?;
-                suffix.push(tail);
-            }
-            // Suffixes for the earlier positions are in reverse slot order.
-            for (&child, &tail) in earlier.iter().zip(suffix.iter().rev()) {
-                outside[child] = outside[child].add(prefix.mul(tail)?)?;
-                prefix = prefix.mul(inside[child])?;
-            }
-            outside[last] = outside[last].add(prefix)?;
+            add_contexts(
+                cell,
+                &rule.operator,
+                &rule.children,
+                &inside,
+                &mut outside,
+                &mut suffix,
+            )?;
         }
     }
 
@@ -301,4 +268,59 @@ fn inside_outside_with<O: WeightedOperator, M: Mass>(
         inside,
         outside,
     })
+}
+
+fn add_contexts<O: WeightedOperator, M: Mass>(
+    cell: Cell,
+    operator: &O,
+    children: &[Cell],
+    inside: &[M],
+    outside: &mut [M],
+    suffix: &mut Vec<M>,
+) -> Result<(), Error> {
+    let Some((&last, earlier)) = children.split_last() else {
+        return Ok(());
+    };
+    let weight = M::from_rational(operator.weight());
+    if weight == M::ZERO {
+        return Ok(());
+    }
+    // Two zero siblings make every position's contribution zero.
+    // With one zero, only the hole in that position contributes.
+    let mut zero_slots = children
+        .iter()
+        .enumerate()
+        .filter(|&(_, &child)| inside[child] == M::ZERO);
+    if let Some((hole, &child)) = zero_slots.next() {
+        if zero_slots.next().is_none() {
+            let context = outside[cell].mul(weight)?;
+            let contribution = M::product(
+                context,
+                children
+                    .iter()
+                    .enumerate()
+                    .filter(|&(slot, _)| slot != hole)
+                    .map(|(_, &sibling)| inside[sibling]),
+            )?;
+            outside[child] = outside[child].add(contribution)?;
+        }
+        return Ok(());
+    }
+    let mut prefix = outside[cell].mul(weight)?;
+    suffix.clear();
+    suffix
+        .try_reserve(earlier.len())
+        .map_err(|_| Error::AllocationFailed)?;
+    let mut tail = M::ONE;
+    for &child in children.iter().skip(1).rev() {
+        tail = inside[child].mul(tail)?;
+        suffix.push(tail);
+    }
+    // Suffixes for the earlier positions are in reverse slot order.
+    for (&child, &tail) in earlier.iter().zip(suffix.iter().rev()) {
+        outside[child] = outside[child].add(prefix.mul(tail)?)?;
+        prefix = prefix.mul(inside[child])?;
+    }
+    outside[last] = outside[last].add(prefix)?;
+    Ok(())
 }
