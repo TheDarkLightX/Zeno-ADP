@@ -4,9 +4,9 @@ Use a built-in grammar's `*_source` function or declare a reusable
 `compiled::Grammar` and bind it to input. Both yield a `compiled::Program`.
 The program fills tables by visiting ordered productions directly.
 `compiled::replay` exposes the cell rank, occurrence ordinal, clause name,
-operator payload and ordered child ranks of every emitted production. Apply
-`compiled::reference_chart` to evaluate a general algebra or run an audit
-on the same ordered emissions.
+operator payload and ordered child ranks of every emitted production. Use
+`compiled::reference_chart` to collect those emissions into a chart, then
+pass the chart to `zeno_adp::tabulate` or `zeno_adp::audit_bounded`.
 
 ## Declaring a sequence grammar
 
@@ -66,11 +66,12 @@ can succeed when a particular dense table cannot be reserved.
   reference chart. Compiled evaluation requires a `fast::Fold` and identifies
   an unsupported algebra type through that trait bound.
 
-Co-optimal recovery and ranking require strict monotonicity in each child
-score. Finite addition meets that condition when all intermediate sums fit
-in `i64` in rule order, including the sums of derivations removed by early
-choice. Use the reference audit to check bounded inputs. Equal-ranked trees
-retain derivation order. [Audits](AUDIT.md) · [Streaming and recovery](FAST.md)
+Table-based recovery relies on finite addition being strictly increasing
+in each child score. Agreement with exhaustive scoring requires all
+intermediate sums to fit in `i64` in rule order, including sums on
+derivations discarded by early choice. Exhaustive root ranking accepts
+any scorer with ordered values. Both interfaces keep derivation order for
+ties. [Audits](AUDIT.md) · [Streaming and recovery](FAST.md)
 
 For a root-only global alignment minimum, `compiled::alignment_rolling`
 keeps the live predecessor scores and passes each finished score to an

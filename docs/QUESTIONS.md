@@ -37,7 +37,6 @@ identities are described in [Forests, tuples and sets](STRUCTURES.md).
 A leaf choice of `0` or `i64::MAX` under a parent of cost `1` gives
 `Error::Overflow` from both exhaustive ranking queries when requesting
 the minimum. The recovery methods can return the tree of score `1`.
-For earlier names, see the [migration table](../CHANGELOG.md#tree-ranking).
 
 ## Partition functions and sampling
 
@@ -92,11 +91,12 @@ epsilons bound the combined relative error under these premises. Unit
 weights give log zero exactly. Rust does not specify a portable ulp bound
 for its transcendental functions. Chart operations and linear-space
 conversion add their own rounding.
-Use the exact algebras for an equality-based Bellman audit. The small
-weighted regression grid compares log values within
-`64 * f64::EPSILON * max(1, abs(ln(exact)))`, and requires exact negative
-infinity for zero. This allowance covers the bounded expression depths
-of that grid and is specific to the regression test.
+Use the exact algebras for an equality-based Bellman audit. Log values were
+finite checked on one four-cell chart with all four root choices and all
+81 assignments of weights 0, 1/3 or 1 to four rule groups. For those 324
+cases, the test allows an absolute log error of
+`64 * f64::EPSILON * max(1, abs(ln(exact)))` for positive weights and
+requires negative infinity for zero. [Weighted test](../tests/probability.rs)
 
 Run `cargo run --offline --locked --example weighted_chart` for a weighted
 chart with two repeated child positions.
@@ -125,12 +125,13 @@ optimum is no higher than any alternative's local optimum. This rule
 applies to signed additive scores with representable intermediates.
 A monotone transformation that shrinks score gaps can invalidate it.
 
-Lean proves ordered equality with exhaustive evaluation in the ranked
-model for the additive, nonnegative-Δ case
-(`BellmanFrontiers.delta_eq_exhaustive`). The corresponding Pareto
-theorem (`BellmanFrontiers.pareto_eq_exhaustive`) assumes componentwise
-monotone constructors and canonical exact front selection.
-[Lean declarations](../verification/BellmanFrontiers.lean)
+For the mathematical ranked chart, ordered equality with exhaustive
+evaluation is proved for a nonnegative Δ when each constructor score is
+its fixed integer weight plus its child scores. For pairs of integers,
+the Pareto theorem requires componentwise monotone constructors and a
+chooser that preserves the empty bag and returns exactly the front in a
+canonical order. Both equalities hold at every in-bounds rank.
+[Score-band and Pareto theorems](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.1.0/verification/BellmanFrontiers.lean)
 
 ## Distinct binary trees by semantic intersection
 

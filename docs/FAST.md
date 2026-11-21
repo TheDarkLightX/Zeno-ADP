@@ -15,7 +15,7 @@ deterministic while using a table.
 
 | API | Result |
 |---|---|
-| `fast::tabulate(&source, &Additive::default())` | Optional finite minimum at each cell. |
+| `fast::tabulate(&source, &Additive::default())` | Optional finite minimum at each cell. Call `cells()` on the returned table to read them all, or `answer()` for the root. |
 | `fast::tabulate(&source, &Count)` | Derivation count at each inhabited cell. Absence is represented by `None`. |
 | `fast::tabulate(&source, &MinimumWithMultiplicity::default())` | Minimum, number of optimal derivations and total derivation count. |
 | `fast::tabulate(&source, &ScoreTrees)` | Minimum and ordered bag of co-optimal derivations at each inhabited cell. |
@@ -26,15 +26,15 @@ A custom `fast::Fold` supplies an operation over selected child summaries
 and a merge operation over one alternative at a time. Match that reduction
 to the corresponding reference algebra's batch choice. Each inhabited
 cell has one summary. For example, the score × tree fold's summary contains
-a score and an entire bag. The empty summary omits unreachable productions.
-The reference engine supports general choice functions and reports all
-audit results. See [the audit guide](AUDIT.md).
+a score and an entire bag. A rule with an absent child contributes
+nothing. Tabulation still visits cells the root cannot reach. The reference
+engine supports general choice functions and bounded audits. [Audit guide](AUDIT.md)
 
 Count uses checked `u128` arithmetic and preserves repeated productions.
 Structural tree ranking uses constructor payloads and ordered children.
 Choose `TreeMultiplicity::Derivations` for occurrence-sensitive results.
-The repaired multiplicity product can opt into attainable infinity and
-uses total counts when the score absorbs.
+With `CostPolicy::AttainableInfinity`, `MinimumWithMultiplicity` uses the
+total derivation count for ties when a rule's score is infinite.
 
 ## Recover trees in two phases
 

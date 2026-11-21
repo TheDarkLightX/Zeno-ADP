@@ -1,4 +1,4 @@
-#[path = "support/round7.rs"]
+#[path = "support/ranked_fixture.rs"]
 mod fixture;
 
 use fixture::{assignments, at, fixture, RANKS};

@@ -5,6 +5,15 @@ edition = "2021"
 authors = ["Dana Edwards (TheDarkLightX)"]
 license = "MIT"
 description = "Algebraic dynamic programming over ranked tree grammars"
+repository = "https://github.com/TheDarkLightX/Zeno-ADP"
+documentation = "https://docs.rs/zeno-adp"
+readme = "README.md"
+keywords = ["dynamic-programming", "grammars", "optimization", "algebra"]
+categories = ["algorithms", "science"]
+include = [
+    "/src/**", "/docs/**", "/examples/**", "/tests/**",
+    "/Cargo.toml", "/Cargo.lock", "/README.md", "/CHANGELOG.md", "/LICENSE",
+]
 
 [profile.dev]
 debug = 0

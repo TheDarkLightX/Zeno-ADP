@@ -1,8 +1,9 @@
 # Forests, tuples and sets
 
-Each of these constructors returns a ranked chart for the same reference
-engine. Use `tabulate_cells` to observe every scheduled subproblem and
-`audit_bounded` to check an algebra on a concrete chart. Run
+Forest comparisons and instantiated tuple grammars expose their ranked
+chart through `chart()`. Set partitions return the chart directly. Use
+`tabulate_cells` to observe every scheduled subproblem and `audit_bounded`
+to check an algebra on that chart. Run
 `cargo run --offline --locked --example structures` for three examples.
 
 ## Ordered trees and forests

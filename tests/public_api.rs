@@ -300,7 +300,7 @@ fn repair_grid_chart(cost: Cost, args: &[&[Cost]]) -> Chart<Op> {
 }
 
 #[test]
-fn repaired_product_agrees_on_round_one_grid_and_nested_absorption() {
+fn minimum_with_multiplicity_handles_finite_costs_and_nested_absorption() {
     let palette = [Cost::Finite(7), Cost::Finite(31), Cost::Infinity];
     let bags: Vec<Vec<Cost>> = (1..1 << palette.len())
         .map(|mask| {

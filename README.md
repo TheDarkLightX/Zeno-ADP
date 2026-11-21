@@ -3,22 +3,24 @@
 Zeno-ADP is a Rust library for algebraic dynamic programming. A grammar
 builds candidate trees. Algebras ask questions about those trees, including
 the minimum or maximum score, counts, Pareto fronts and distributions over
-derivations. The [query table](docs/QUESTIONS.md) gives each question's
-arithmetic, answer identity and audit.
+derivations. The query guide lists what each algebra counts and how to
+check its answers. [Query guide](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.1.0/docs/QUESTIONS.md)
 
-## Install from source
+## Installation
 
-Place a Zeno-ADP checkout next to your application and add it to `Cargo.toml`.
+Add the crate to your application's `Cargo.toml`.
 
 ```toml
 [dependencies]
-zeno-adp = { path = "../zeno-adp" }
+zeno-adp = "0.1.0"
 ```
 
 ## Find the cheapest matrix parenthesization
 
-The grammar supplies both parenthesizations for three matrices of sizes
-10×30, 30×5 and 5×60. The score counts scalar multiplications.
+The grammar supplies both parenthesizations for matrices A (10×30),
+B (30×5) and C (5×60). Multiplying (AB)C takes 4,500 scalar
+multiplications. A(BC) takes 27,000. The same grammar answers both
+“what is the minimum cost?” and “how many choices are there?”
 
 ```rust
 use zeno_adp::algebras::{Cost, Count};
@@ -45,8 +47,9 @@ the structural grammars. `compiled::replay` reports the cell rank, occurrence
 ordinal, clause name, constructor payload and ordered child ranks.
 `compiled::tabulate_root` observes each cell as it finishes and keeps the
 root and live summaries, with a last-use entry for each rank.
-[Compiler guide](docs/COMPILER.md) · [Streaming and recovery](docs/FAST.md) ·
-[Forests, crossings and sets](docs/STRUCTURES.md)
+[Compiler guide](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.1.0/docs/COMPILER.md) ·
+[Streaming and recovery](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.1.0/docs/FAST.md) ·
+[Forests, crossings and sets](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.1.0/docs/STRUCTURES.md)
 
 For tree queries, pass `TreeMultiplicity::default()` for distinct ordered
 constructor terms or `TreeMultiplicity::Derivations` for occurrences.
@@ -56,13 +59,13 @@ table, as does `first_minimum_tree`. Both rank in ascending score order
 and keep first derivation order for ties. `Count` counts occurrences.
 `Classes` lists distinct keys. `Classified` applies a question per key
 and may return several pairs per key.
-[Ranking contracts](docs/QUESTIONS.md#ranking-trees) · [Migration](CHANGELOG.md#tree-ranking)
+[Ranking contracts](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.1.0/docs/QUESTIONS.md#ranking-trees)
 
 Exact weighted algebras use checked rational arithmetic. `ExactSampler`
 uses independent uniform `u64` words and draws on a positive partition.
 Equal returned terms collect their derivation masses. Binary64 log
 algebras support approximate evaluations. Use exact arithmetic for
-equality audits. [Weighted questions](docs/QUESTIONS.md#partition-functions-and-sampling)
+equality audits. [Weighted questions](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.1.0/docs/QUESTIONS.md#partition-functions-and-sampling)
 
 ## Check a bounded input
 
@@ -72,21 +75,23 @@ a product with its paired chooser. A completed report exposes Bellman
 failures in `bellman.first_failure` and duplicate identities in
 `ambiguities`. A budget or evaluation error leaves the verdict incomplete.
 
-Equality with exhaustive Rust evaluation needs representable intermediate
-arithmetic, including on branches removed by early choice. A full table can
-also encounter errors outside the root. Lean proves the mathematical
-tabulation theorem and its stated instances. The executable bridge compares
-five serialized answer bags per rank on 1,892 charts from five built-in
-short domains and a ranked fixture. Enumeration uses recoded constructor
-IDs. The lexicographic question adds a synthetic secondary cost and
-uses only finite-weight rules.
-[Audit guide](docs/AUDIT.md) · [Verification](verification/README.md)
+For ranked charts with total operations, tabulation gives the same answers
+as exhaustive evaluation when choice preserves the empty bag, commutes
+with merging alternatives, and can be applied to children before their
+parent without changing the chosen answers. This equality is proved for
+the mathematical chart. In Rust, agreement also requires successful
+operations on discarded branches and on every cell evaluated.
+
+Rust's reference table was finite checked against that specification on
+1,892 charts covering short folding, alignment, matrix-chain and knapsack
+inputs and a four-cell fixture. The audit guide gives the exact domains
+and five answers compared at each rank. [Audit guide](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.1.0/docs/AUDIT.md#verification-scope)
 
 Run `cargo run --offline --locked --example matrix_chain` from the checkout.
-The other [examples](examples) cover alignment, folding, knapsack, custom
-sequence and streaming grammars, weighted derivations and structures.
+The other examples cover alignment, folding, knapsack, custom sequence and
+streaming grammars, weighted derivations and structures. [Examples](https://github.com/TheDarkLightX/Zeno-ADP/tree/v0.1.0/examples)
 
-[MIT license](LICENSE)
+[API documentation](https://docs.rs/zeno-adp/0.1.0/zeno_adp/) · [MIT license](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.1.0/LICENSE)
 
 ## Acknowledgements
 
