@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.4.0
+
+- Generate ordered schedules for forest edit and alignment, proper linear
+  MCFGs, and set partitions.
+- Compile contiguous grammars over any positive number of tracks. Generate
+  prefix schedules with clauses that advance a selected subset of tracks.
+- Select several ranks with `compiled::tabulate_selected`. Evaluate two
+  independent algebras on one schedule with `compiled::tabulate_joint`,
+  retaining the ranks requested for each algebra.
+- Fill independent ranks with experimental `compiled::tabulate_parallel`.
+  Scoped workers are reused across waves. Global alignment tiles and
+  interval-length schedules for Nussinov and generated intervals skip
+  planning replay.
+- Supply exact-size child iterators in every table mode. Validate
+  arity and descending ranks at the multi-track emission boundary.
+- Show the supported scope and fix in the diagnostic for `with fn` inside
+  inherent and trait implementations.
+
+### Upgrading from 0.3.0
+
+- Change the dependency version to `0.4.0`. Existing byte and typed
+  sequence grammar declarations use the same entry points.
+- Custom `Fold` implementations keep their `Iterator + Clone` signature.
+  Every evaluator now reports the exact remaining child count through
+  `size_hint()`. Keep fold operations independent of evaluation order
+  across cells.
+- Use a positive track count. `Grammar<_, 0>` now reports that the
+  grammar needs at least one input track.
+- To evaluate an associated grammar, define it without `with fn` and
+  call `compiled::tabulate(&Self::grammar(input)?, &algebra)` in the
+  evaluation method. Module and function-local declarations can use
+  the paired shorthand.
+- Choose output ranks separately for each algebra with
+  `compiled::tabulate_joint`. Pass the same rank to both projections
+  when you need the pair of answers. Use a full table for random cell
+  access or tree recovery.
+
 ## 0.3.0
 
 - Compose nullary and unary prefix grammars with `grammars::PrefixProduct`.

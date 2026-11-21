@@ -357,3 +357,265 @@ fn all_orders_of_fanout_three_components() {
     assert_eq!(accepts, orderings);
     println!("MCFG fan-out three: {cases} cases, {cells} cells, {accepts} accepted roots");
 }
+
+macro_rules! generated_mcfg {
+    ($name:ident, $eval:ident, $join:expr) => {
+        zeno_adp::compiled_grammar! {
+            fn $name(input: u8) -> Op {
+                mcfg SYMBOLS; start START;
+                production Join(m): START, vec![COPY, COPY], vec![$join]
+                    => Op::Join(m.children[0].spans[0].range().len());
+                production Base0(m): COPY, vec![], vec![vec![Atom::Byte(0)]; 2] => Op::Base(0);
+                production Extend0(m): COPY, vec![COPY],
+                    vec![vec![Atom::Byte(0), part(0, 0)], vec![Atom::Byte(0), part(0, 1)]]
+                    => Op::Extend(0);
+                production Base1(m): COPY, vec![], vec![vec![Atom::Byte(1)]; 2] => Op::Base(1);
+                production Extend1(m): COPY, vec![COPY],
+                    vec![vec![Atom::Byte(1), part(0, 0)], vec![Atom::Byte(1), part(0, 1)]]
+                    => Op::Extend(1);
+            }
+            with fn $eval: Count = Count;
+        }
+    };
+}
+
+generated_mcfg!(generated_crossing, crossing_count, crossing());
+generated_mcfg!(
+    generated_reversed,
+    reversed_count,
+    vec![part(0, 1), part(1, 0), part(0, 0), part(1, 1)]
+);
+
+#[test]
+fn generated_mcfg_replays_ranked_items_and_ordered_productions() {
+    let crossing = copies(crossing());
+    let reversed = copies(vec![part(0, 1), part(1, 0), part(0, 0), part(1, 1)]);
+    let mut cells = 0;
+    for size in 0..=WORD_BYTES {
+        for bits in 0..1 << size {
+            let word: Vec<_> = (0..size).map(|bit| ((bits >> bit) & 1) as u8).collect();
+            for (bound, instance, paired) in [
+                (
+                    generated_crossing(&word).unwrap(),
+                    crossing.instantiate(&word).unwrap(),
+                    crossing_count(&word).unwrap(),
+                ),
+                (
+                    generated_reversed(&word).unwrap(),
+                    reversed.instantiate(&word).unwrap(),
+                    reversed_count(&word).unwrap(),
+                ),
+            ] {
+                let generated =
+                    super::check_generated(&bound, instance.chart(), &Count, |_, _, op| match op {
+                        Op::Join(_) => "Join",
+                        Op::Base(0) => "Base0",
+                        Op::Base(1) => "Base1",
+                        Op::Extend(0) => "Extend0",
+                        Op::Extend(1) => "Extend1",
+                        _ => panic!("unexpected copying-grammar operator"),
+                    });
+                assert_eq!(paired, generated);
+                let minimum =
+                    zeno_adp::compiled::tabulate(&bound, &zeno_adp::algebras::Additive::default())
+                        .unwrap();
+                let expected = tabulate_cells(instance.chart(), &Minimum).unwrap();
+                assert_eq!(minimum.cells().len(), expected.len());
+                assert!(minimum
+                    .cells()
+                    .iter()
+                    .zip(&expected)
+                    .all(|(one, bag)| one.iter().eq(bag)));
+                for (rank, item) in instance.items().iter().enumerate() {
+                    assert_eq!(bound.item(rank), Some(item));
+                }
+                assert_eq!(bound.item(instance.items().len()), None);
+                cells += instance.items().len();
+            }
+        }
+    }
+
+    const ALIASES: &[Symbol<'_>] = &[
+        Symbol {
+            name: "start",
+            components: 1,
+        },
+        Symbol {
+            name: "leaf",
+            components: 1,
+        },
+    ];
+    zeno_adp::compiled_grammar! {
+        fn alias(input: u8) -> Op {
+            mcfg ALIASES; start START;
+            production Alias(m): START, vec![COPY], vec![vec![part(0, 0)]] => Op::Alias;
+            production First(m): COPY, vec![], vec![vec![Atom::Any]] => Op::Base(m.input[0]);
+            production Second(m): COPY, vec![], vec![vec![Atom::Any]] => Op::Base(m.input[0]);
+        }
+        with fn alias_count: Count = Count;
+    }
+    let bound = alias(&[1]).unwrap();
+    let mut sites = Vec::new();
+    zeno_adp::compiled::replay(&bound, |cell, ordinal, site, op, children| {
+        sites.push((cell, ordinal, site.to_owned(), op, children.to_vec()));
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(
+        sites,
+        [
+            (0, 0, "First".into(), Op::Base(1), vec![]),
+            (0, 1, "Second".into(), Op::Base(1), vec![]),
+            (1, 0, "Alias".into(), Op::Alias, vec![0]),
+        ]
+    );
+    let alias_reference = zeno_adp::Chart::new(
+        vec![
+            vec![
+                zeno_adp::Rule::new(Op::Base(1), []),
+                zeno_adp::Rule::new(Op::Base(1), []),
+            ],
+            vec![zeno_adp::Rule::new(Op::Alias, [0])],
+        ],
+        1,
+    )
+    .unwrap();
+    assert_eq!(
+        alias_count(&[1]).unwrap(),
+        super::check_generated(&bound, &alias_reference, &Count, |rank, ordinal, _| {
+            [["First", "Second"][ordinal], "Alias"][rank]
+        })
+    );
+
+    zeno_adp::compiled_grammar! {
+        fn repeated_part(input: u8) -> Op {
+            mcfg ALIASES; start START;
+            production Repeated(m): START, vec![COPY], vec![vec![part(0, 0), part(0, 0)]]
+                => Op::Alias;
+        }
+    }
+    assert!(
+        matches!(repeated_part(&[]), Err(Error::UnsupportedGrammar { name, .. }) if name == "Repeated")
+    );
+    println!(
+        "generated MCFG: 254 binary-word charts, {cells} cells; alias control: 1 chart, 2 cells"
+    );
+}
+
+fn crossing_with_suffix() -> Vec<Atom> {
+    let mut atoms = crossing();
+    atoms.extend([Atom::Any, Atom::Byte(1)]);
+    atoms
+}
+
+generated_mcfg!(generated_suffix, suffix_count, crossing_with_suffix());
+
+#[test]
+fn last_variable_reserves_fixed_width_for_the_suffix() {
+    let reference = copies(crossing_with_suffix());
+    let mut chart_count = 0;
+    let mut ranks = 0;
+    let mut inhabited_roots = 0;
+    for size in 0..=WORD_BYTES {
+        for bits in 0..1 << size {
+            let word: Vec<_> = (0..size).map(|bit| ((bits >> bit) & 1) as u8).collect();
+            let bound = generated_suffix(&word).unwrap();
+            let instance = reference.instantiate(&word).unwrap();
+            let generated =
+                super::check_generated(&bound, instance.chart(), &Count, |_, _, op| match op {
+                    Op::Join(_) => "Join",
+                    Op::Base(0) => "Base0",
+                    Op::Base(1) => "Base1",
+                    Op::Extend(0) => "Extend0",
+                    Op::Extend(1) => "Extend1",
+                    _ => panic!("unexpected copying-grammar operator"),
+                });
+            assert_eq!(suffix_count(&word).unwrap(), generated);
+            for (rank, item) in instance.items().iter().enumerate() {
+                assert_eq!(bound.item(rank), Some(item));
+            }
+            let width = crossing().len();
+            let expected = word.last() == Some(&1)
+                && size == width + 2
+                && word[..width / 2] == word[width / 2..width];
+            assert_eq!(generated.answer().copied(), expected.then_some(1));
+            inhabited_roots += usize::from(expected);
+            chart_count += 1;
+            ranks += instance.items().len();
+        }
+    }
+    assert_eq!(inhabited_roots, 8);
+    println!(
+        "MCFG fixed suffix: {chart_count} charts, {ranks} ranks, {inhabited_roots} inhabited roots"
+    );
+}
+
+#[test]
+fn tuple_keys_wider_than_a_word_keep_all_endpoint_bits() {
+    // At this input length, six components need more than u64 endpoint bits.
+    // Moving two bytes between the first two components makes their truncated
+    // keys coincide. The two successful splits must remain separate.
+    const FAN_OUT: usize = 6;
+    const LENGTH: usize = u64::BITS as usize;
+    const EXTRA_WIDTH: usize = 2;
+    let symbols = [
+        Symbol {
+            name: "start",
+            components: 1,
+        },
+        Symbol {
+            name: "wide",
+            components: FAN_OUT,
+        },
+    ];
+    let mut pattern = vec![Atom::Byte(1); LENGTH - FAN_OUT - EXTRA_WIDTH];
+    pattern.extend((0..FAN_OUT).map(|component| part(0, component)));
+    let leaf = |wide: usize, name: &str| {
+        let mut patterns = vec![vec![Atom::Any]; FAN_OUT];
+        patterns[wide].extend([Atom::Any; EXTRA_WIDTH]);
+        Production {
+            name: name.into(),
+            parent: COPY,
+            children: vec![],
+            patterns,
+            operator: Box::new(move |_| Op::Base(wide as u8)),
+        }
+    };
+    let grammar = Grammar::new(
+        &symbols,
+        START,
+        vec![
+            Production {
+                name: "Wide".into(),
+                parent: START,
+                children: vec![COPY],
+                patterns: vec![pattern],
+                operator: Box::new(|_| Op::Alias),
+            },
+            leaf(0, "FirstWide"),
+            leaf(1, "SecondWide"),
+        ],
+    )
+    .unwrap();
+    let accepted = [1; LENGTH];
+    let mut refused = accepted;
+    refused[0] = 0;
+    let mut ranks = 0;
+    for (input, count) in [(&accepted, Some(2)), (&refused, None)] {
+        let reference = grammar.instantiate(input).unwrap();
+        let compiled = zeno_adp::mcfg::compile(&grammar, input).unwrap();
+        let table =
+            super::check_generated(&compiled, reference.chart(), &Count, |_, _, op| match op {
+                Op::Alias => "Wide",
+                Op::Base(0) => "FirstWide",
+                Op::Base(1) => "SecondWide",
+                _ => panic!("unexpected wide-tuple operator"),
+            });
+        for (rank, item) in reference.items().iter().enumerate() {
+            assert_eq!(compiled.item(rank), Some(item));
+        }
+        assert_eq!(table.answer().copied(), count);
+        ranks += reference.items().len();
+    }
+    println!("MCFG wide tuple: 2 charts, {ranks} ranks");
+}

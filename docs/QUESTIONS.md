@@ -184,7 +184,7 @@ its fixed integer weight plus its child scores. For pairs of integers,
 the Pareto theorem requires componentwise monotone constructors and a
 chooser that preserves the empty bag and returns exactly the front in a
 canonical order. Both equalities hold at every in-bounds rank.
-[Score-band and Pareto theorems](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.3.0/verification/BellmanFrontiers.lean)
+[Score-band and Pareto theorems](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.4.0/verification/BellmanFrontiers.lean)
 
 ## Rule-label provenance
 

@@ -34,3 +34,29 @@ fn grammar_parameter_label_does_not_shadow_a_caller_item_in_a_clause() {
     assert_eq!(paired.cells(), [Some(1)]);
     assert_eq!(tabulate_cells(&reference, &Count).unwrap(), [vec![1]]);
 }
+
+mod visible_constant {
+    use super::*;
+
+    #[allow(non_upper_case_globals)]
+    const argument: &[u8] = &[];
+
+    compiled_grammar! {
+        fn parse(data: u8) -> Leaf {
+            prefix |tokens, start, end|;
+            empty Base => Ok(Some(Leaf));
+        }
+        with fn count: Count = Count;
+    }
+
+    #[test]
+    fn paired_signature_accepts_a_visible_const_named_argument() {
+        let chart = Chart::new(vec![vec![Rule::new(Leaf, [])]], 0).unwrap();
+        assert_eq!(count(argument).unwrap().cells(), [Some(1)]);
+        assert_eq!(tabulate_cells(&chart, &Count).unwrap(), [vec![1]]);
+        assert_eq!(
+            count(argument).unwrap(),
+            compiled::tabulate(&parse(argument).unwrap(), &Count).unwrap()
+        );
+    }
+}

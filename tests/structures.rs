@@ -39,3 +39,40 @@ where
     assert_eq!(audit.tree_nodes, budget);
     budget
 }
+
+fn check_generated<O: zeno_adp::Operator + Eq + std::fmt::Debug, A>(
+    grammar: &impl zeno_adp::compiled::Program<Op = O>,
+    reference: &zeno_adp::Chart<O>,
+    algebra: &A,
+    site_for: impl Fn(usize, usize, &O) -> &'static str,
+) -> zeno_adp::fast::Table<<A as zeno_adp::fast::Fold<O>>::Value>
+where
+    A: zeno_adp::fast::Fold<O>
+        + zeno_adp::Algebra<O, Value = <A as zeno_adp::fast::Fold<O>>::Value>,
+    <A as zeno_adp::fast::Fold<O>>::Value: Eq + std::fmt::Debug,
+{
+    let mut emitted = 0;
+    zeno_adp::compiled::replay(grammar, |rank, ordinal, site, operator, children| {
+        let expected = &reference.cells()[rank][ordinal];
+        assert_eq!(operator, expected.operator);
+        assert_eq!(children, expected.children);
+        assert_eq!(site, site_for(rank, ordinal, &expected.operator));
+        emitted += 1;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(
+        emitted,
+        reference.cells().iter().map(Vec::len).sum::<usize>()
+    );
+    let expected = zeno_adp::tabulate_cells(reference, algebra).unwrap();
+    let actual = zeno_adp::compiled::tabulate(grammar, algebra).unwrap();
+    assert_eq!(actual.root(), reference.root());
+    assert!(actual
+        .cells()
+        .iter()
+        .zip(&expected)
+        .all(|(one, bag)| one.iter().eq(bag)));
+    assert_eq!(actual.cells().len(), expected.len());
+    actual
+}

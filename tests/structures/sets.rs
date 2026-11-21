@@ -164,3 +164,59 @@ fn pivot_observation_for_finite_relation() {
     }
     println!("pivot-observations {observations:?}");
 }
+
+// Three elements cover every overlap pattern among singletons, pairs and a triple.
+const GENERATED_ELEMENTS: u32 = 3;
+
+#[test]
+fn generated_partitions_match_every_availability_predicate() {
+    let mut charts = 0;
+    let mut cells = 0;
+    for elements in 0..=GENERATED_ELEMENTS {
+        for family in 0..1usize << ((1usize << elements) - 1) {
+            let allowed = |block: usize| family & (1usize << (block - 1)) != 0;
+            let source = zeno_adp::sets::partition_source(elements, allowed).unwrap();
+            let reference = partitions(elements, allowed).unwrap();
+            let actual = super::check_generated(&source, &reference, &Count, set_site);
+            zeno_adp::compiled::replay(&source, |rank, _, site, op, children| {
+                match op {
+                    PartitionOp::Empty => assert_eq!((rank, site, children), (0, "Empty", &[][..])),
+                    PartitionOp::Block(block) => {
+                        assert_eq!(site, "Block");
+                        assert_eq!(children, &[rank ^ block]);
+                        assert_ne!(block & (rank & rank.wrapping_neg()), 0);
+                    }
+                }
+                Ok(())
+            })
+            .unwrap();
+            cells += actual.cells().len();
+            charts += 1;
+        }
+    }
+    assert_eq!((charts, cells), (139, 1_061));
+    println!("generated sets: {charts} charts, {cells} cells");
+
+    zeno_adp::compiled_grammar! {
+        fn even_blocks(elements: u32) {
+            set_partitions |block| => block.count_ones() % 2 == 0 && elements <= GENERATED_ELEMENTS;
+        }
+        with fn even_count: Count = Count;
+    }
+    for n in 0..=GENERATED_ELEMENTS {
+        let source = even_blocks(n).unwrap();
+        let reference = partitions(n, |block| block.count_ones() % 2 == 0).unwrap();
+        assert_eq!(
+            even_count(n).unwrap(),
+            super::check_generated(&source, &reference, &Count, set_site)
+        );
+    }
+    assert!(matches!(even_blocks(usize::BITS), Err(Error::Overflow)));
+}
+
+fn set_site(_: usize, _: usize, operator: &PartitionOp) -> &'static str {
+    match operator {
+        PartitionOp::Empty => "Empty",
+        PartitionOp::Block(_) => "Block",
+    }
+}

@@ -56,3 +56,54 @@ pub fn partitions(
     }
     Chart::new(cells, size - 1)
 }
+
+/// Bind the set partition schedule without retaining any productions.
+/// The predicate is evaluated once per nonempty mask, in increasing order.
+pub fn partition_source(
+    elements: u32,
+    allowed_block: impl Fn(usize) -> bool,
+) -> Result<impl crate::compiled::Program<Op = PartitionOp>, Error> {
+    let size = 1usize.checked_shl(elements).ok_or(Error::Overflow)?;
+    let mut allowed = crate::reserve_table(size)?;
+    allowed.push(false);
+    allowed.extend((1..size).map(allowed_block));
+    Ok(crate::compiled::generated::Ranked(Partitions(allowed)))
+}
+
+struct Partitions(Vec<bool>);
+
+impl crate::compiled::generated::Layout for Partitions {
+    type Op = PartitionOp;
+
+    fn cell_count(&self) -> usize {
+        self.0.len()
+    }
+
+    fn root(&self) -> crate::Cell {
+        self.0.len() - 1
+    }
+
+    #[inline]
+    fn emit(
+        &self,
+        set: crate::Cell,
+        sink: &mut impl crate::compiled::ProductionSink<PartitionOp>,
+    ) -> Result<(), Error> {
+        if set == 0 {
+            return sink.rule("Empty", PartitionOp::Empty, []);
+        }
+        let anchor = set & set.wrapping_neg();
+        let optional = set ^ anchor;
+        let mut tail = optional;
+        loop {
+            let block = anchor | tail;
+            if self.0[block] {
+                sink.rule("Block", PartitionOp::Block(block), [optional ^ tail])?;
+            }
+            if tail == 0 {
+                return Ok(());
+            }
+            tail = (tail - 1) & optional;
+        }
+    }
+}

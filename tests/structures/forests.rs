@@ -157,6 +157,29 @@ fn edit_minima_and_cut_multiplicities_at_every_cell() {
             );
             let cut_count = tabulate_cells(cut.chart(), &Count).unwrap();
             let script_count = tabulate_cells(local.chart(), &Count).unwrap();
+            let source = generated_edit(&left.forest, &right.forest).unwrap();
+            let generated_counts =
+                super::check_generated(&source, local.chart(), &Count, forest_site);
+            assert!(generated_counts
+                .cells()
+                .iter()
+                .zip(&script_count)
+                .all(|(one, bag)| one.iter().eq(bag)));
+            let generated_scores =
+                zeno_adp::compiled::tabulate(&source, &zeno_adp::algebras::Additive::default())
+                    .unwrap();
+            assert_eq!(generated_scores.cells().len(), cut_minimum.len());
+            assert!(generated_scores
+                .cells()
+                .iter()
+                .zip(&cut_minimum)
+                .all(|(one, bag)| one.iter().eq(bag)));
+            if left.ends.is_empty() || right.ends.is_empty() {
+                assert_eq!(
+                    self::script_count(&left.forest, &right.forest).unwrap(),
+                    generated_counts
+                );
+            }
 
             let mut left_projections = BTreeMap::new();
             let mut right_projections = BTreeMap::new();
@@ -294,6 +317,28 @@ fn alignment_matches_all_superforest_projections() {
             let scores = tabulate_cells(actual.chart(), &Minimum).unwrap();
             let counts = tabulate_cells(actual.chart(), &Count).unwrap();
             let terms = tabulate_cells(actual.chart(), &Enumerate).unwrap();
+            let source = generated_alignment(&left.forest, &right.forest).unwrap();
+            let generated_counts =
+                super::check_generated(&source, actual.chart(), &Count, forest_site);
+            assert!(generated_counts
+                .cells()
+                .iter()
+                .zip(&counts)
+                .all(|(one, bag)| one.iter().eq(bag)));
+            let generated_scores =
+                zeno_adp::compiled::tabulate(&source, &zeno_adp::algebras::Additive::default())
+                    .unwrap();
+            assert_eq!(generated_scores.cells().len(), scores.len());
+            assert!(generated_scores
+                .cells()
+                .iter()
+                .zip(&scores)
+                .all(|(one, bag)| one.iter().eq(bag)));
+            assert_eq!(
+                alignment_count(&left.forest, &right.forest).unwrap(),
+                generated_counts
+            );
+
             for (rank, (a, b)) in actual.spans().iter().enumerate() {
                 let l = project(&left.ends, a.clone(), (1 << a.len()) - 1);
                 let r = project(&right.ends, b.clone(), (1 << b.len()) - 1);
@@ -442,4 +487,95 @@ fn forest_semantic_controls_and_reference_audits() {
     );
     let alignment_nodes = audit_example(projected.chart(), &Minimum);
     println!("forest controls: edit {edit_distance:?}, alignment {alignment_distance:?}, audits {cut_nodes}/{edit_nodes}/{alignment_nodes} tree nodes");
+}
+
+zeno_adp::compiled_grammar! {
+    fn generated_edit(left, right: u8) { forest edit; }
+    with fn script_count: Count = Count;
+}
+
+zeno_adp::compiled_grammar! {
+    fn generated_alignment(left, right: u8) { forest alignment; }
+    with fn alignment_count: Count = Count;
+}
+
+fn forest_site(_: usize, _: usize, operator: &ForestOp) -> &'static str {
+    match operator {
+        ForestOp::Empty => "Empty",
+        ForestOp::DeleteLeft(_) => "DeleteLeft",
+        ForestOp::DeleteRight(_) => "DeleteRight",
+        ForestOp::Match { .. } => "Match",
+        ForestOp::GapLeft(_) => "GapLeft",
+        ForestOp::GapRight(_) => "GapRight",
+        ForestOp::Cut { .. } => panic!("the generated forest schedules use root productions"),
+    }
+}
+
+fn check_forest_rank_replay(
+    source: &(impl zeno_adp::compiled::Program<Op = ForestOp> + Sync),
+    chart: &zeno_adp::Chart<ForestOp>,
+) -> usize {
+    use zeno_adp::{algebras::Additive, compiled};
+
+    assert_eq!(source.root(), chart.root());
+    assert_eq!(source.cell_count(), chart.cells().len());
+    for (rank, expected) in chart.cells().iter().enumerate() {
+        let mut actual = Vec::new();
+        source
+            .rules_at(rank, |operator, children| {
+                actual.push((operator, children.to_vec()));
+                Ok(())
+            })
+            .unwrap();
+        assert!(
+            actual
+                .iter()
+                .map(|(operator, children)| (operator, children.as_slice()))
+                .eq(expected
+                    .iter()
+                    .map(|rule| (&rule.operator, rule.children.as_slice()))),
+            "forest rules_at({rank}): {actual:?}, expected {expected:?}"
+        );
+    }
+
+    let algebra = Additive::default();
+    let expected = tabulate_cells(chart, &algebra).unwrap();
+    let workers = std::num::NonZeroUsize::new(2).unwrap();
+    for table in [
+        compiled::tabulate(source, &algebra).unwrap(),
+        compiled::tabulate_parallel(source, &algebra, workers).unwrap(),
+    ] {
+        assert_eq!(table.cells().len(), expected.len());
+        assert!(table
+            .cells()
+            .iter()
+            .zip(&expected)
+            .all(|(actual, bag)| actual.iter().eq(bag)));
+    }
+    expected.len()
+}
+
+#[test]
+fn forest_per_rank_replay_and_parallel_match_the_chart() {
+    // Includes promotion and sibling order, as well as the empty/leaf pair
+    // that distinguishes a right-side rank accidentally fixed at zero.
+    const MAX_NODES: usize = 2;
+    let domain = fixtures(MAX_NODES);
+    assert_eq!(domain.len(), 11);
+    let mut checked = [0; 2];
+    for left in &domain {
+        for right in &domain {
+            let left = &left.forest;
+            let right = &right.forest;
+            checked[0] += check_forest_rank_replay(
+                &generated_edit(left, right).unwrap(),
+                edit(left, right).unwrap().chart(),
+            );
+            checked[1] += check_forest_rank_replay(
+                &generated_alignment(left, right).unwrap(),
+                alignment(left, right).unwrap().chart(),
+            );
+        }
+    }
+    assert_eq!(checked, [2601, 2601]);
 }

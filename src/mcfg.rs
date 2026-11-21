@@ -1,6 +1,6 @@
 //! Multiple context-free grammars over one byte string and nonempty components.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::ops::Range;
 
 use crate::{Cell, Chart, Error, Operator, Rule};
@@ -9,7 +9,7 @@ use crate::{Cell, Chart, Error, Operator, Rule};
 pub type Nonterminal = usize;
 
 /// Half-open coordinates of one component on the input.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Span {
     pub start: usize,
     pub end: usize,
@@ -35,7 +35,7 @@ pub struct Symbol<'a> {
 }
 
 /// A scheduled cell's nonterminal and component spans in declaration order.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Item {
     pub nonterminal: Nonterminal,
     pub spans: Vec<Span>,
@@ -210,23 +210,11 @@ impl<O: Operator> Grammar<O> {
             let parent = &pending[emitted.len()];
             let mut occurrences = Vec::new();
             for (rule, production) in self.rules[parent.nonterminal].iter().enumerate() {
-                let children = production
-                    .children
-                    .iter()
-                    .map(|&nonterminal| Item {
-                        nonterminal,
-                        spans: vec![Span { start: 0, end: 0 }; self.components[nonterminal]],
-                    })
-                    .collect();
-                let mut matches = Matcher {
-                    input,
-                    parent,
-                    patterns: &production.patterns,
-                    children,
-                    matches: Vec::new(),
-                };
-                matches.component(0);
-                occurrences.extend(matches.matches.into_iter().map(|children| (rule, children)));
+                occurrences.extend(
+                    self.match_children(input, parent, production)
+                        .into_iter()
+                        .map(|children| (rule, children)),
+                );
             }
             let rules = occurrences
                 .into_iter()
@@ -247,18 +235,7 @@ impl<O: Operator> Grammar<O> {
             emitted.push(rules);
         }
 
-        let mut schedule: Vec<_> = (0..pending.len()).collect();
-        schedule.sort_unstable_by_key(|&id| {
-            let item = &pending[id];
-            (
-                item.spans
-                    .iter()
-                    .map(|span| span.end - span.start)
-                    .sum::<usize>(),
-                self.order[item.nonterminal],
-                id,
-            )
-        });
+        let schedule = self.schedule(&pending);
         let mut ranks = vec![0; pending.len()];
         for (rank, &id) in schedule.iter().enumerate() {
             ranks[id] = rank;
@@ -290,6 +267,46 @@ impl<O: Operator> Grammar<O> {
             chart: Chart::new(cells, ranks[0])?,
             items,
         })
+    }
+    fn schedule(&self, items: &[Item]) -> Vec<usize> {
+        let mut schedule: Vec<_> = (0..items.len()).collect();
+        schedule.sort_unstable_by_key(|&id| {
+            let item = &items[id];
+            (
+                item.spans
+                    .iter()
+                    .map(|span| span.end - span.start)
+                    .sum::<usize>(),
+                self.order[item.nonterminal],
+                id,
+            )
+        });
+        schedule
+    }
+
+    fn match_children(
+        &self,
+        input: &[u8],
+        parent: &Item,
+        production: &Production<O>,
+    ) -> Vec<Vec<Item>> {
+        let children = production
+            .children
+            .iter()
+            .map(|&nonterminal| Item {
+                nonterminal,
+                spans: vec![Span { start: 0, end: 0 }; self.components[nonterminal]],
+            })
+            .collect();
+        let mut matches = Matcher {
+            input,
+            parent,
+            patterns: &production.patterns,
+            children,
+            matches: Vec::new(),
+        };
+        matches.component(0);
+        matches.matches
     }
 }
 
@@ -330,7 +347,9 @@ impl Matcher<'_> {
                 component: part,
             } => {
                 let last_end = end - (remaining - 1);
-                for split in cursor + 1..=last_end {
+                // The last atom must consume all remaining tokens.
+                let first_end = if remaining == 1 { end } else { cursor + 1 };
+                for split in first_end..=last_end {
                     self.children[child].spans[part] = Span {
                         start: cursor,
                         end: split,
@@ -346,5 +365,374 @@ fn refusal(name: &str, reason: &'static str) -> Error {
     Error::UnsupportedGrammar {
         name: name.to_owned(),
         reason,
+    }
+}
+
+/// An input-bound, reachable-item schedule. It retains child indices and
+/// production indices. Constructors run when a cell is evaluated or replayed.
+pub struct Compiled<'a, O, G> {
+    grammar: G,
+    input: &'a [u8],
+    items: Vec<Item>,
+    occurrences: Vec<Occurrence>,
+    cell_rules: Vec<Range<usize>>,
+    edges: Vec<Cell>,
+    schedule: Vec<usize>,
+    ranks: Vec<Cell>,
+    operator: std::marker::PhantomData<fn() -> O>,
+}
+
+struct Occurrence {
+    production: usize,
+    children: Range<usize>,
+}
+
+struct MatchPlan {
+    children: Vec<(Nonterminal, Range<usize>)>,
+    patterns: Vec<Vec<MatchAtom>>,
+    slots: usize,
+}
+
+enum MatchAtom {
+    Token(Option<u8>),
+    Span { slot: usize, last: bool },
+}
+
+impl MatchPlan {
+    fn new<O>(rule: &Production<O>, components: &[usize]) -> Self {
+        let mut slots = 0;
+        let children: Vec<_> = rule
+            .children
+            .iter()
+            .map(|&nt| {
+                let start = slots;
+                slots += components[nt];
+                (nt, start..slots)
+            })
+            .collect();
+        let patterns = rule
+            .patterns
+            .iter()
+            .map(|pattern| {
+                let last = pattern
+                    .iter()
+                    .rposition(|atom| matches!(atom, Atom::Component { .. }));
+                pattern
+                    .iter()
+                    .enumerate()
+                    .map(|(index, atom)| match *atom {
+                        Atom::Byte(byte) => MatchAtom::Token(Some(byte)),
+                        Atom::Any => MatchAtom::Token(None),
+                        Atom::Component { child, component } => MatchAtom::Span {
+                            slot: children[child].1.start + component,
+                            last: last == Some(index),
+                        },
+                    })
+                    .collect()
+            })
+            .collect();
+        Self {
+            children,
+            patterns,
+            slots,
+        }
+    }
+}
+
+struct MatchStream<'a, F> {
+    input: &'a [u8],
+    parent: &'a [Span],
+    patterns: &'a [Vec<MatchAtom>],
+    scratch: &'a mut [Span],
+    emit: F,
+}
+
+impl<'a, F: FnMut(&[Span])> MatchStream<'a, F> {
+    fn run(&mut self) {
+        let span = self.parent[0];
+        self.atoms(0, &self.patterns[0], span.start, span.end);
+    }
+
+    fn atoms(
+        &mut self,
+        mut component: usize,
+        mut pattern: &'a [MatchAtom],
+        mut cursor: usize,
+        mut end: usize,
+    ) {
+        loop {
+            if end - cursor < pattern.len() {
+                return;
+            }
+            match pattern {
+                [] => {
+                    if cursor != end {
+                        return;
+                    }
+                    component += 1;
+                    let Some(span) = self.parent.get(component) else {
+                        (self.emit)(self.scratch);
+                        return;
+                    };
+                    (cursor, end) = (span.start, span.end);
+                    pattern = &self.patterns[component];
+                }
+                [MatchAtom::Token(byte), rest @ ..] => {
+                    if byte.is_some_and(|expected| self.input[cursor] != expected) {
+                        return;
+                    }
+                    cursor += 1;
+                    pattern = rest;
+                }
+                [MatchAtom::Span { slot, last }, rest @ ..] => {
+                    let last_end = end - rest.len();
+                    // Fixed-width tokens force the end of the final variable.
+                    // Only the earlier feasible endpoints need a recursive branch.
+                    if !*last {
+                        for split in cursor + 1..last_end {
+                            self.scratch[*slot] = Span {
+                                start: cursor,
+                                end: split,
+                            };
+                            self.atoms(component, rest, split, end);
+                        }
+                    }
+                    self.scratch[*slot] = Span {
+                        start: cursor,
+                        end: last_end,
+                    };
+                    cursor = last_end;
+                    pattern = rest;
+                }
+            }
+        }
+    }
+}
+
+// Short coordinate tuples can be indexed without allocating a second copy
+// of their spans. The bound comes from the number of endpoint bits that fit
+// in the key. The general index applies to every other tuple.
+enum ItemIndex {
+    Packed {
+        bits: u32,
+        entries: HashMap<u64, usize>,
+    },
+    Spans(HashMap<Vec<Span>, usize>),
+}
+
+impl ItemIndex {
+    fn new(input_len: usize, components: usize) -> Self {
+        let bits = (usize::BITS - input_len.leading_zeros()).max(1);
+        if components <= (u64::BITS / bits / 2) as usize {
+            Self::Packed {
+                bits,
+                entries: HashMap::new(),
+            }
+        } else {
+            Self::Spans(HashMap::new())
+        }
+    }
+
+    fn intern(&mut self, spans: &[Span], fresh: usize) -> usize {
+        match self {
+            Self::Packed { bits, entries } => {
+                let key = spans.iter().fold(0, |key, span| {
+                    (((key << *bits) | span.start as u64) << *bits) | span.end as u64
+                });
+                *entries.entry(key).or_insert(fresh)
+            }
+            Self::Spans(entries) => match entries.get(spans) {
+                Some(&id) => id,
+                None => {
+                    entries.insert(spans.to_vec(), fresh);
+                    fresh
+                }
+            },
+        }
+    }
+}
+
+/// Discover reachable items for a checked linear MCFG. Accepts either an
+/// owned grammar or a borrowed one.
+pub fn compile<O: Operator, G: std::borrow::Borrow<Grammar<O>>>(
+    grammar: G,
+    input: &[u8],
+) -> Result<Compiled<'_, O, G>, Error> {
+    let definition = grammar.borrow();
+    let plans: Vec<Vec<_>> = definition
+        .rules
+        .iter()
+        .map(|rules| {
+            rules
+                .iter()
+                .map(|rule| MatchPlan::new(rule, &definition.components))
+                .collect()
+        })
+        .collect();
+    let root = Item {
+        nonterminal: definition.start,
+        spans: vec![Span {
+            start: 0,
+            end: input.len(),
+        }],
+    };
+    let mut index: Vec<_> = definition
+        .components
+        .iter()
+        .map(|&components| ItemIndex::new(input.len(), components))
+        .collect();
+    index[root.nonterminal].intern(&root.spans, 0);
+    let mut order = BTreeMap::from([((input.len(), definition.order[root.nonterminal]), vec![0])]);
+    let mut items = vec![root];
+    let mut occurrences = Vec::new();
+    let mut edges = Vec::new();
+    let mut cell_rules = Vec::new();
+    let mut discovered = Vec::new();
+    let mut scratch = Vec::new();
+
+    while cell_rules.len() < items.len() {
+        let parent = &items[cell_rules.len()];
+        let first = occurrences.len();
+        for (production, plan) in plans[parent.nonterminal].iter().enumerate() {
+            if scratch.len() < plan.slots {
+                scratch.resize(plan.slots, Span { start: 0, end: 0 });
+            }
+            MatchStream {
+                input,
+                parent: &parent.spans,
+                patterns: &plan.patterns,
+                scratch: &mut scratch[..plan.slots],
+                emit: |coordinates: &[Span]| {
+                    let start = edges.len();
+                    for (nonterminal, parts) in &plan.children {
+                        let spans = &coordinates[parts.clone()];
+                        let fresh = items.len() + discovered.len();
+                        let id = index[*nonterminal].intern(spans, fresh);
+                        if id == fresh {
+                            let consumed = spans.iter().map(|span| span.end - span.start).sum();
+                            order
+                                .entry((consumed, definition.order[*nonterminal]))
+                                .or_default()
+                                .push(id);
+                            discovered.push(Item {
+                                nonterminal: *nonterminal,
+                                spans: spans.to_vec(),
+                            });
+                        }
+                        edges.push(id);
+                    }
+                    occurrences.push(Occurrence {
+                        production,
+                        children: start..edges.len(),
+                    });
+                },
+            }
+            .run();
+        }
+        cell_rules.push(first..occurrences.len());
+        items.append(&mut discovered);
+    }
+
+    // Ordered buckets sort by yield and nonterminal. Appending to each
+    // bucket retains discovery order without comparing item coordinates.
+    let schedule: Vec<_> = order.into_values().flatten().collect();
+    let mut ranks = vec![0; schedule.len()];
+    for (rank, &id) in schedule.iter().enumerate() {
+        ranks[id] = rank;
+    }
+    Ok(Compiled {
+        grammar,
+        input,
+        items,
+        occurrences,
+        cell_rules,
+        edges,
+        schedule,
+        ranks,
+        operator: std::marker::PhantomData,
+    })
+}
+
+impl<O: Operator, G: std::borrow::Borrow<Grammar<O>>> Compiled<'_, O, G> {
+    /// The semantic item at a rank, including an absent root on empty input.
+    pub fn item(&self, rank: Cell) -> Option<&Item> {
+        self.schedule.get(rank).map(|&id| &self.items[id])
+    }
+
+    fn emit_cell<'a>(
+        &'a self,
+        rank: Cell,
+        matched: &mut Vec<&'a Item>,
+        children: &mut Vec<Cell>,
+        mut emit: impl FnMut(&str, O, &[Cell]) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        let &id = self.schedule.get(rank).ok_or(Error::CellOutOfRange(rank))?;
+        let parent = &self.items[id];
+        for rule in &self.occurrences[self.cell_rules[id].clone()] {
+            matched.clear();
+            children.clear();
+            let ids = &self.edges[rule.children.clone()];
+            matched.extend(ids.iter().map(|&child| &self.items[child]));
+            children.extend(ids.iter().map(|&child| self.ranks[child]));
+            let production = &self.grammar.borrow().rules[parent.nonterminal][rule.production];
+            let operator = (production.operator)(Matched {
+                input: self.input,
+                parent,
+                children: matched,
+            });
+            crate::validate_rule(rank, &operator, children)?;
+            emit(&production.name, operator, children)?;
+        }
+        Ok(())
+    }
+}
+
+impl<O: Operator, G: std::borrow::Borrow<Grammar<O>>> crate::fast::RuleSource
+    for Compiled<'_, O, G>
+{
+    type Op = O;
+
+    fn cell_count(&self) -> usize {
+        self.schedule.len()
+    }
+
+    fn root(&self) -> Cell {
+        self.ranks[0]
+    }
+
+    fn rules_at(
+        &self,
+        rank: Cell,
+        mut emit: impl FnMut(O, &[Cell]) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        self.emit_cell(rank, &mut Vec::new(), &mut Vec::new(), |_, op, children| {
+            emit(op, children)
+        })
+    }
+}
+
+impl<O, G> crate::compiled::sealed::Sealed for Compiled<'_, O, G> {}
+
+impl<O: Operator, G: std::borrow::Borrow<Grammar<O>>> crate::compiled::Program
+    for Compiled<'_, O, G>
+{
+    fn fill(&self, sink: &mut impl crate::compiled::ProductionSink<O>) -> Result<(), Error> {
+        let mut matched = Vec::new();
+        let mut ranks = Vec::new();
+        for rank in 0..self.schedule.len() {
+            self.emit_cell(
+                rank,
+                &mut matched,
+                &mut ranks,
+                |site, op, children| match children {
+                    [] => sink.rule(site, op, []),
+                    &[child] => sink.rule(site, op, [child]),
+                    &[left, right] => sink.rule(site, op, [left, right]),
+                    _ => sink.rule_slice(site, op, children),
+                },
+            )?;
+            sink.finish_cell()?;
+        }
+        Ok(())
     }
 }

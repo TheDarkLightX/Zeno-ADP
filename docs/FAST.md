@@ -23,8 +23,12 @@ deterministic while using a table.
 | `fast::reference_chart(&source)` | Explicit chart for any reference `Algebra`, exhaustive evaluation and the bounded audit. |
 
 A custom `fast::Fold` supplies an operation over selected child summaries
-and a merge operation over one alternative at a time. Match that reduction
-to the corresponding reference algebra's batch choice. Each inhabited
+and a merge operation over one alternative at a time. Use the operator
+and its child values in argument order, including repeats. The child
+iterator reports its exact remaining length, and clones keep their
+current position. Keep both operations deterministic and independent
+of callback order across cells and thread identity. Match the fold's
+reduction to the corresponding reference algebra's batch choice. Each inhabited
 cell has one summary. For example, the score × tree fold's summary contains
 a score and an entire bag. A rule with an absent child contributes
 nothing. Tabulation still visits cells the root cannot reach. The reference

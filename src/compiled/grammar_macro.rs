@@ -1,4 +1,4 @@
-/// Generate a single-track production schedule and optionally pair it with
+/// Generate a ranked production schedule and optionally pair it with
 /// a streaming algebra. See the compiler guide for supported layouts.
 ///
 /// ```
@@ -131,24 +131,140 @@ macro_rules! compiled_grammar {
                 $($shape $site $(($split))? => $body;)+))
         }
 
-        $(
-            // Rust permits unnamed constants in modules and blocks, where
-            // the paired function can name the grammar directly. It rejects
-            // them in impls and traits, where that name could be ambiguous.
-            const _: () = ();
-
-            $eval_vis fn $eval(bound_input: &[$token]) -> ::core::result::Result<
-                $crate::fast::Table<<$fold as $crate::fast::Fold<$op>>::Value>,
-                $crate::Error,
-            > {
-                // Resolve the grammar before introducing the caller's argument name.
-                let bind = $name;
-                let $arg = bound_input;
-                let _ = $arg;
-                $crate::compiled::generated::tabulate::<_, $fold>($algebra, bind(bound_input))
-            }
-        )?
+        // Reuse the binding name from the grammar signature and the original
+        // paired expansion so this entry point needs no extra parameter name.
+        $crate::compiled_grammar!(@pair $name => [$op] (bound_input => $arg: &[$token])
+            $(with $eval_vis fn $eval: $fold = $algebra;)?);
     };
+    (
+        $vis:vis fn $name:ident($left:ident, $right:ident: $label:ty) { forest $kind:ident; }
+        $(with $eval_vis:vis fn $eval:ident: $fold:ty = $algebra:expr;)?
+    ) => {
+        $vis fn $name<'forest>(left: &'forest [$crate::forests::Node<$label>], right: &'forest [$crate::forests::Node<$label>])
+            -> ::core::result::Result<impl $crate::compiled::Program<Op = $crate::forests::ForestOp> + 'forest, $crate::Error>
+        {
+            $crate::compiled_grammar!(@forest $kind left right)
+        }
+
+        $crate::compiled_grammar!(@pair $name => [$crate::forests::ForestOp]
+            (left => $left: &[$crate::forests::Node<$label>], right => $right: &[$crate::forests::Node<$label>])
+            $(with $eval_vis fn $eval: $fold = $algebra;)?);
+    };
+    (@forest edit $left:ident $right:ident) => { $crate::forests::edit_source($left, $right) };
+    (@forest alignment $left:ident $right:ident) => { $crate::forests::alignment_source($left, $right) };
+    (@forest $kind:ident $left:ident $right:ident) => {
+        ::core::compile_error!(::core::concat!(
+            "unsupported forest layout ", ::core::stringify!($kind), "; expected edit or alignment"
+        ))
+    };
+
+    (
+        $vis:vis fn $name:ident($elements:ident: u32) {
+            set_partitions |$block:ident| => $allowed:expr;
+        }
+        $(with $eval_vis:vis fn $eval:ident: $fold:ty = $algebra:expr;)?
+    ) => {
+        $vis fn $name(bound_elements: ::core::primitive::u32)
+            -> ::core::result::Result<impl $crate::compiled::Program<Op = $crate::sets::PartitionOp>, $crate::Error>
+        {
+            let $elements = bound_elements;
+            let _ = $elements;
+            $crate::sets::partition_source(bound_elements, move |$block| { let _ = $block; $allowed })
+        }
+
+        $crate::compiled_grammar!(@pair $name => [$crate::sets::PartitionOp]
+            (bound_elements => $elements: ::core::primitive::u32)
+            $(with $eval_vis fn $eval: $fold = $algebra;)?);
+    };
+
+    (
+        $vis:vis fn $name:ident($arg:ident: $token:ty) -> $op:ty {
+            prefix_tracks $n:literal |$inputs:ident, $ends:ident|;
+            $($shape:ident $site:ident $([$($consume:literal),+ $(,)?])? => $body:expr;)+
+        }
+        $(with $eval_vis:vis fn $eval:ident: $fold:ty = $algebra:expr;)?
+    ) => {
+        $vis fn $name(bound_input: [&[$token]; $n])
+            -> ::core::result::Result<impl $crate::compiled::Program<Op = $op> + '_, $crate::Error>
+        {
+            {
+                #[allow(dead_code, non_camel_case_types)]
+                enum ClauseNames { $($site,)+ }
+            }
+            $crate::compiled::generated::tracks::bind(::core::stringify!($name), bound_input,
+                $crate::compiled_grammar!(@group [] $({
+                    $crate::compiled_grammar!(@track_clause
+                        (|$inputs: $token, $ends| [$n] -> $op)
+                        $shape $site $([$($consume),+])? => $body)
+                })+)
+            )
+        }
+
+        $crate::compiled_grammar!(@pair $name => [$op] (bound_input => $arg: [&[$token]; $n])
+            $(with $eval_vis fn $eval: $fold = $algebra;)?);
+    };
+    (@track_clause $params:tt empty $site:ident => $body:expr) => {
+        $crate::compiled::generated::tracks::Empty(::core::stringify!($site),
+            $crate::compiled_grammar!(@track_body $params => $body))
+    };
+    (@track_clause $params:tt step $site:ident [$($consume:literal),+] => $body:expr) => {
+        $crate::compiled::generated::tracks::Step::new(
+            ::core::stringify!($site), [$($consume),+],
+            $crate::compiled_grammar!(@track_body $params => $body))
+    };
+    (@track_clause $params:tt $shape:ident $site:ident $($rest:tt)*) => {
+        ::core::compile_error!(::core::concat!("unsupported prefix_tracks clause ", ::core::stringify!($site),
+            "; expected empty NAME or step NAME [track flags]"))
+    };
+    (@track_body (|$inputs:ident: $token:ty, $ends:ident| [$n:literal] -> $op:ty) => $body:expr) => {
+        |$inputs: [&[$token]; $n], $ends: [::core::primitive::usize; $n]|
+            -> ::core::result::Result<::core::option::Option<$op>, $crate::Error> {
+            let _ = ($inputs, $ends);
+            $body
+        }
+    };
+
+    (
+        $vis:vis fn $name:ident($arg:ident: u8) -> $op:ty {
+            mcfg $symbols:expr; start $root:expr;
+            $(production $site:ident($matched:ident): $parent:expr, $children:expr, $patterns:expr
+                => $body:expr;)+
+        }
+        $(with $eval_vis:vis fn $eval:ident: $fold:ty = $algebra:expr;)?
+    ) => {
+        $vis fn $name(bound_input: &[::core::primitive::u8])
+            -> ::core::result::Result<$crate::mcfg::Compiled<'_, $op, $crate::mcfg::Grammar<$op>>, $crate::Error>
+        {
+            let grammar = $crate::mcfg::Grammar::new($symbols, $root, ::std::vec![
+                $($crate::mcfg::Production {
+                    name: ::std::string::String::from(::core::stringify!($site)),
+                    parent: $parent,
+                    children: $children,
+                    patterns: $patterns,
+                    operator: ::std::boxed::Box::new(|$matched| { let _ = &$matched; $body }),
+                }),+
+            ])?;
+            $crate::mcfg::compile(grammar, bound_input)
+        }
+
+        $crate::compiled_grammar!(@pair $name => [$op] (bound_input => $arg: &[::core::primitive::u8])
+            $(with $eval_vis fn $eval: $fold = $algebra;)?);
+    };
+
+    (@pair $name:ident => [$op:ty] ($($value:ident => $arg:ident: $input:ty),+)
+        with $eval_vis:vis fn $eval:ident: $fold:ty = $algebra:expr;) => {
+        $crate::__with_fn_requires_module_or_block__omit_with_fn_and_call_compiled_tabulate!();
+
+        $eval_vis fn $eval($($value: $input),+) -> ::core::result::Result<
+            $crate::fast::Table<<$fold as $crate::fast::Fold<$op>>::Value>,
+            $crate::Error,
+        > {
+            let bind = $name;
+            $(let $arg = $value; let _ = &$arg;)+
+            $crate::compiled::generated::tabulate::<_, $fold>($algebra, bind($($value),+))
+        }
+    };
+    (@pair $name:ident => [$op:ty] ($($value:ident => $arg:ident: $input:ty),+)) => {};
     (@layout $name:ident prefix) => { true };
     (@layout $name:ident interval) => { false };
     (@layout $name:ident $other:ident) => {
@@ -201,5 +317,15 @@ macro_rules! compiled_grammar {
             let _ = ($input, $start, $end, $split);
             $body
         }
+    };
+}
+
+/// Scope gate for the paired shorthand. Rust diagnoses the unnamed item
+/// only at an associated item site and prints the emitting macro's name.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __with_fn_requires_module_or_block__omit_with_fn_and_call_compiled_tabulate {
+    () => {
+        const _: () = ();
     };
 }

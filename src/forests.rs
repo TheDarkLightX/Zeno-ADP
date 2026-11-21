@@ -1,6 +1,5 @@
 //! Ranked grammars for ordered forest edit and alignment.
 
-use std::collections::BTreeMap;
 use std::ops::Range;
 
 use crate::algebras::{Cost, ScoredOperator};
@@ -247,7 +246,6 @@ struct Side<'a, L> {
     labels: Vec<&'a L>,
     ends: Vec<usize>,
     spans: Vec<Range<usize>>,
-    ranks: BTreeMap<(usize, usize), Cell>,
 }
 
 impl<'a, L> Side<'a, L> {
@@ -261,7 +259,6 @@ impl<'a, L> Side<'a, L> {
             labels: Vec::new(),
             ends: Vec::new(),
             spans: Vec::new(),
-            ranks: BTreeMap::new(),
         };
         while let Some(visit) = pending.pop() {
             match visit {
@@ -275,20 +272,15 @@ impl<'a, L> Side<'a, L> {
             }
         }
         for begin in 0..=side.labels.len() {
-            let spans: Vec<_> = side
-                .boundaries(&(begin..side.labels.len()))
-                .map(|end| begin..end)
-                .collect();
-            side.spans.extend(spans);
+            let mut end = begin;
+            side.spans.push(begin..end);
+            while let Some(&next) = side.ends.get(end) {
+                end = next;
+                side.spans.push(begin..end);
+            }
         }
         side.spans
             .sort_unstable_by_key(|span| (span.len(), span.start));
-        side.ranks = side
-            .spans
-            .iter()
-            .enumerate()
-            .map(|(rank, span)| ((span.start, span.end), rank))
-            .collect();
         side
     }
 
@@ -304,7 +296,9 @@ impl<'a, L> Side<'a, L> {
     }
 
     fn rank(&self, span: &Range<usize>) -> Cell {
-        self.ranks[&(span.start, span.end)]
+        self.spans
+            .binary_search_by_key(&(span.len(), span.start), |span| (span.len(), span.start))
+            .expect("span consists of complete subtrees")
     }
 
     fn frontiers(&self) -> Vec<Vec<Frontier>> {
@@ -337,4 +331,216 @@ impl<'a, L> Side<'a, L> {
 struct Frontier {
     nodes: Vec<usize>,
     covered: usize,
+}
+
+/// Bind the first-root edit schedule. Counts describe scripts. Use
+/// [`edit_reference`] to audit counts of distinct edit mappings.
+pub fn edit_source<'a, L: PartialEq>(
+    left: &'a [Node<L>],
+    right: &'a [Node<L>],
+) -> Result<impl crate::compiled::Program<Op = ForestOp> + 'a, Error> {
+    ComparisonLayout::<_, false>::bind(left, right)
+}
+
+/// Bind the gapped forest alignment schedule without retaining productions.
+pub fn alignment_source<'a, L: PartialEq>(
+    left: &'a [Node<L>],
+    right: &'a [Node<L>],
+) -> Result<impl crate::compiled::Program<Op = ForestOp> + 'a, Error> {
+    ComparisonLayout::<_, true>::bind(left, right)
+}
+
+struct ComparisonLayout<'a, L, const ALIGN: bool> {
+    left: RankedSide<'a, L, ALIGN>,
+    right: RankedSide<'a, L, ALIGN>,
+    count: usize,
+    root: Cell,
+}
+
+struct RankedSide<'a, L, const ALIGN: bool> {
+    side: Side<'a, L>,
+    transitions: Vec<Option<RootRanks>>,
+    next_prefix: Vec<Option<Cell>>,
+    empty_prefix: Vec<Cell>,
+}
+
+#[derive(Clone, Copy)]
+struct RootRanks {
+    promote: Cell,
+    children: Cell,
+    siblings: Cell,
+}
+
+impl<'a, L, const ALIGN: bool> RankedSide<'a, L, ALIGN> {
+    fn new(side: Side<'a, L>) -> Result<Self, Error> {
+        let mut transitions = crate::reserve_table(side.spans.len())?;
+        transitions.extend(side.spans.iter().map(|span| {
+            if span.is_empty() {
+                return None;
+            }
+            let children = side.children(span.start);
+            Some(RootRanks {
+                promote: side.rank(&(span.start + 1..span.end)),
+                children: side.rank(&children),
+                siblings: side.rank(&(children.end..span.end)),
+            })
+        }));
+        let mut next_prefix = Vec::new();
+        let mut empty_prefix = Vec::new();
+        if ALIGN {
+            next_prefix = crate::reserve_table(side.spans.len())?;
+            empty_prefix = crate::reserve_table(side.spans.len())?;
+            for span in &side.spans {
+                next_prefix.push(
+                    side.ends
+                        .get(span.end)
+                        .map(|&end| side.rank(&(span.start..end))),
+                );
+                empty_prefix.push(side.rank(&(span.start..span.start)));
+            }
+        }
+        Ok(Self {
+            side,
+            transitions,
+            next_prefix,
+            empty_prefix,
+        })
+    }
+
+    fn splits(&self, rank: Cell) -> impl Iterator<Item = (Cell, Cell)> + '_ {
+        // Start with an empty prefix. Transfer one whole first subtree
+        // from the suffix to the prefix at each step.
+        std::iter::successors(
+            Some((self.empty_prefix[rank], rank)),
+            |&(prefix, suffix)| {
+                self.transitions[suffix].map(|ranks| {
+                    (
+                        self.next_prefix[prefix].expect("nonempty suffix has a root"),
+                        ranks.siblings,
+                    )
+                })
+            },
+        )
+    }
+}
+
+impl<'a, L: PartialEq, const ALIGN: bool> ComparisonLayout<'a, L, ALIGN> {
+    fn bind(
+        left: &'a [Node<L>],
+        right: &'a [Node<L>],
+    ) -> Result<crate::compiled::generated::Ranked<Self>, Error> {
+        let left = Side::new(left);
+        let right = Side::new(right);
+        let count = left
+            .spans
+            .len()
+            .checked_mul(right.spans.len())
+            .ok_or(Error::Overflow)?;
+        let root = left.rank(&(0..left.labels.len())) * right.spans.len()
+            + right.rank(&(0..right.labels.len()));
+        Ok(crate::compiled::generated::Ranked(Self {
+            left: RankedSide::new(left)?,
+            right: RankedSide::new(right)?,
+            count,
+            root,
+        }))
+    }
+
+    #[inline]
+    fn emit_pair(
+        &self,
+        left_rank: Cell,
+        right_rank: Cell,
+        sink: &mut impl crate::compiled::ProductionSink<ForestOp>,
+    ) -> Result<(), Error> {
+        let width = self.right.transitions.len();
+        let left = self.left.side.spans[left_rank].start;
+        let right = self.right.side.spans[right_rank].start;
+        let a = self.left.transitions[left_rank];
+        let b = self.right.transitions[right_rank];
+        let rank = |x, y| x * width + y;
+
+        if let Some(a) = a {
+            if ALIGN {
+                for (prefix, suffix) in self.right.splits(right_rank) {
+                    sink.rule(
+                        "GapRight",
+                        ForestOp::GapRight(left),
+                        [rank(a.children, prefix), rank(a.siblings, suffix)],
+                    )?;
+                }
+            } else {
+                sink.rule(
+                    "DeleteLeft",
+                    ForestOp::DeleteLeft(left),
+                    [rank(a.promote, right_rank)],
+                )?;
+            }
+        }
+        if let Some(b) = b {
+            if ALIGN {
+                for (prefix, suffix) in self.left.splits(left_rank) {
+                    sink.rule(
+                        "GapLeft",
+                        ForestOp::GapLeft(right),
+                        [rank(prefix, b.children), rank(suffix, b.siblings)],
+                    )?;
+                }
+            } else {
+                sink.rule(
+                    "DeleteRight",
+                    ForestOp::DeleteRight(right),
+                    [rank(left_rank, b.promote)],
+                )?;
+            }
+        }
+        match (a, b) {
+            (None, None) => sink.rule("Empty", ForestOp::Empty, []),
+            (Some(a), Some(b)) => sink.rule(
+                "Match",
+                ForestOp::Match {
+                    left,
+                    right,
+                    different: self.left.side.labels[left] != self.right.side.labels[right],
+                },
+                [rank(a.children, b.children), rank(a.siblings, b.siblings)],
+            ),
+            _ => Ok(()),
+        }
+    }
+}
+
+impl<L: PartialEq, const ALIGN: bool> crate::compiled::generated::Layout
+    for ComparisonLayout<'_, L, ALIGN>
+{
+    type Op = ForestOp;
+
+    fn cell_count(&self) -> usize {
+        self.count
+    }
+
+    fn root(&self) -> Cell {
+        self.root
+    }
+
+    #[inline]
+    fn emit(
+        &self,
+        cell: Cell,
+        sink: &mut impl crate::compiled::ProductionSink<ForestOp>,
+    ) -> Result<(), Error> {
+        let width = self.right.transitions.len();
+        self.emit_pair(cell / width, cell % width, sink)
+    }
+
+    #[inline]
+    fn fill(&self, sink: &mut impl crate::compiled::ProductionSink<ForestOp>) -> Result<(), Error> {
+        for left_rank in 0..self.left.transitions.len() {
+            for right_rank in 0..self.right.transitions.len() {
+                self.emit_pair(left_rank, right_rank, sink)?;
+                sink.finish_cell()?;
+            }
+        }
+        Ok(())
+    }
 }

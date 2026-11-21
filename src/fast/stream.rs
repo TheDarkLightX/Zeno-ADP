@@ -78,14 +78,24 @@ pub fn reference_chart<G: RuleSource>(source: &G) -> Result<Chart<G::Op>, Error>
 
 /// A streaming algebra with one summary per inhabited cell.
 ///
+/// Implement `apply` using only the operator and the ordered sequence of
+/// child summaries. Implement `merge` using only its accumulator and the
+/// next contribution. These operations must be deterministic and independent
+/// of the evaluator, call order across cells, thread identity, and side effects.
+/// A rule with an absent child contributes nothing and never calls `apply`.
+///
 /// For agreement with an equivalent reference algebra, reducing an ordered
 /// stream of contributions must agree with its batch choice, and applying the
 /// operator to selected child summaries must implement the same question.
 /// Exactness against exhaustive trees additionally requires the relevant
-/// Bellman laws. An empty cell has no summary and disables any rule using it.
+/// Bellman laws.
 pub trait Fold<O> {
     type Value;
 
+    /// Consume child summaries in constructor argument order, including
+    /// repeated children. Library evaluators provide an exact-size iterator.
+    /// `size_hint()` returns `(remaining, Some(remaining))`. Cloning preserves
+    /// the current position.
     fn apply<'a>(
         &self,
         operator: &'a O,
@@ -125,7 +135,8 @@ impl<V> Table<V> {
 }
 
 /// Evaluate and discard each emitted rule immediately. Source and evaluation
-/// errors are encountered in traversal order.
+/// errors are encountered in traversal order. The algebra must satisfy the
+/// ordered, deterministic [`Fold`] contract.
 pub fn tabulate<G: RuleSource, A: Fold<G::Op>>(
     source: &G,
     algebra: &A,
@@ -157,7 +168,7 @@ pub(crate) fn fold_rule<'a, O, A: Fold<O>>(
     algebra: &A,
     chosen: &mut Result<Option<A::Value>, Error>,
     operator: &'a O,
-    values: impl Iterator<Item = Option<&'a A::Value>> + Clone,
+    values: impl ExactSizeIterator<Item = Option<&'a A::Value>> + Clone,
 ) -> Result<(), Error>
 where
     A::Value: 'a,
@@ -165,7 +176,21 @@ where
     if values.clone().any(|value| value.is_none()) {
         return Ok(());
     }
-    let next = algebra.apply(operator, values.flatten())?;
+    let present = values.map(|value| value.expect("all child summaries are present"));
+    fold_present(algebra, chosen, operator, present)
+}
+
+#[inline]
+pub(crate) fn fold_present<'a, O, A: Fold<O>>(
+    algebra: &A,
+    chosen: &mut Result<Option<A::Value>, Error>,
+    operator: &'a O,
+    values: impl ExactSizeIterator<Item = &'a A::Value> + Clone,
+) -> Result<(), Error>
+where
+    A::Value: 'a,
+{
+    let next = algebra.apply(operator, values)?;
     // Reference evaluation applies every alternative before choice.
     if let Ok(selected) = chosen {
         if let Err(error) = algebra.merge(selected, next) {
@@ -178,6 +203,7 @@ where
 impl<O: ScoredOperator> Fold<O> for Additive {
     type Value = Cost;
 
+    #[inline]
     fn apply<'a>(
         &self,
         operator: &'a O,

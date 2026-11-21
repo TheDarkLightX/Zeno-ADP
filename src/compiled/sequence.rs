@@ -1,12 +1,9 @@
-use std::ops::{Range, RangeInclusive};
+use std::ops::Range;
 
 use crate::fast::RuleSource;
 use crate::{reserve_table, Cell, Error, Operator};
 
 use super::{sealed, ProductionSink, Program};
-
-// The sequence compiler admits contiguous one- and two-track grammars.
-const SUPPORTED_TRACKS: RangeInclusive<usize> = 1..=2;
 
 /// Index into a grammar's declared nonterminal names.
 pub type Nonterminal = usize;
@@ -109,7 +106,7 @@ pub struct TokenProduction<O, const TRACKS: usize, T, A = TokenAtom<T>> {
     pub operator: Box<SequenceConstructor<O, TRACKS, T>>,
 }
 
-/// A context-free grammar over one or two contiguous input tracks.
+/// A context-free grammar over a positive number of contiguous input tracks.
 ///
 /// Stable nonterminal IDs index the name list. Rules are tried in declaration
 /// order. Within a rule, splits are tried in increasing boundary order on
@@ -142,8 +139,8 @@ impl<O: Operator, const TRACKS: usize, T: Eq, A: TrackAtom<T>> TokenGrammar<O, T
         root: Nonterminal,
         productions: Vec<TokenProduction<O, TRACKS, T, A>>,
     ) -> Result<Self, Error> {
-        if !SUPPORTED_TRACKS.contains(&TRACKS) {
-            return Err(refusal("sequence", "expected one or two input tracks"));
+        if TRACKS == 0 {
+            return Err(refusal("sequence", "expected at least one input track"));
         }
         if root >= names.len() {
             return Err(refusal("root", "unknown nonterminal"));

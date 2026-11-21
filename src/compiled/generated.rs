@@ -1,11 +1,12 @@
 //! Implementation of the generated single-track grammar schedules.
 
+pub mod tracks;
 use std::marker::PhantomData;
 
 use crate::fast::{Fold, RuleSource, Table};
 use crate::{reserve_table, validate_arity, Cell, Error, Operator};
 
-use super::{sealed, ProductionSink, Program};
+use super::{sealed, ParallelLayout, ProductionSink, Program};
 
 /// Evaluate a paired algebra after constructing it in the caller's scope.
 pub fn tabulate<G: Program, A: Fold<G::Op>>(
@@ -212,7 +213,15 @@ impl<O, F: FnMut(O, &[Cell]) -> Result<(), Error>> ProductionSink<O> for Visit<F
     }
 }
 
-impl<T, O, R, const PREFIX: bool> sealed::Sealed for Generated<'_, T, O, R, PREFIX> {}
+impl<T, O, R, const PREFIX: bool> sealed::Sealed for Generated<'_, T, O, R, PREFIX> {
+    fn parallel_layout(grammar: &Self) -> ParallelLayout<'_> {
+        if PREFIX {
+            ParallelLayout::Replay
+        } else {
+            ParallelLayout::GeneratedIntervals(&grammar.offsets)
+        }
+    }
+}
 
 impl<T, O: Operator, R: Rules<T, O, PREFIX>, const PREFIX: bool> Program
     for Generated<'_, T, O, R, PREFIX>
@@ -259,5 +268,55 @@ impl<O: Operator, S: ProductionSink<O>, const PREFIX: bool> AtCell<'_, O, S, PRE
         // comes from the caller-supplied payload and is checked on emission.
         validate_arity(self.rank, &operator, N)?;
         self.sink.rule(site, operator, children)
+    }
+}
+
+/// Internal ranked layout shared by generated structure schedules.
+pub(crate) trait Layout {
+    type Op: Operator;
+
+    fn cell_count(&self) -> usize;
+    fn root(&self) -> Cell;
+    fn emit(&self, cell: Cell, sink: &mut impl ProductionSink<Self::Op>) -> Result<(), Error>;
+    fn fill(&self, sink: &mut impl ProductionSink<Self::Op>) -> Result<(), Error> {
+        for cell in 0..self.cell_count() {
+            self.emit(cell, sink)?;
+            sink.finish_cell()?;
+        }
+        Ok(())
+    }
+}
+
+pub(crate) struct Ranked<G>(pub(crate) G);
+
+impl<G: Layout> RuleSource for Ranked<G> {
+    type Op = G::Op;
+
+    fn cell_count(&self) -> usize {
+        self.0.cell_count()
+    }
+
+    fn root(&self) -> Cell {
+        self.0.root()
+    }
+
+    fn rules_at(
+        &self,
+        cell: Cell,
+        emit: impl FnMut(Self::Op, &[Cell]) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        if cell >= self.cell_count() {
+            return Err(Error::CellOutOfRange(cell));
+        }
+        self.0.emit(cell, &mut Visit(emit))
+    }
+}
+
+impl<G> sealed::Sealed for Ranked<G> {}
+
+impl<G: Layout> Program for Ranked<G> {
+    #[inline]
+    fn fill(&self, sink: &mut impl ProductionSink<Self::Op>) -> Result<(), Error> {
+        self.0.fill(sink)
     }
 }

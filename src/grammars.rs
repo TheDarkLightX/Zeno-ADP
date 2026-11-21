@@ -1,6 +1,6 @@
 use crate::algebras::{Cost, ScoredOperator};
 pub(crate) use crate::compiled::ProductionSink as RankedRules;
-use crate::compiled::{schedule, Program};
+use crate::compiled::{schedule, ParallelLayout, Program};
 use crate::fast::RuleSource;
 use crate::{reserve_table, Cell, Chart, Error, Operator, Rule};
 
@@ -206,17 +206,22 @@ impl RuleSource for NussinovSource<'_> {
     }
 }
 
-schedule!(NussinovSource<'_>, Fold, |source, output| {
-    output.rule("fold/empty", Fold::Empty, [])?;
-    output.finish_cell()?;
-    for length in 1..=source.sequence.len() {
-        for start in 0..=source.sequence.len() - length {
-            source.interval_rules(start, length, output)?;
-            output.finish_cell()?;
+schedule!(
+    NussinovSource<'_>,
+    Fold,
+    |source, output| {
+        output.rule("fold/empty", Fold::Empty, [])?;
+        output.finish_cell()?;
+        for length in 1..=source.sequence.len() {
+            for start in 0..=source.sequence.len() - length {
+                source.interval_rules(start, length, output)?;
+                output.finish_cell()?;
+            }
         }
-    }
-    Ok(())
-});
+        Ok(())
+    },
+    |source| ParallelLayout::IntervalLengths(&source.ranks.offsets)
+);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Align {
@@ -342,15 +347,23 @@ pub fn alignment_source<'a>(
     AlignmentGrid::new(left, right)
 }
 
-schedule!(AlignmentGrid<'_>, Align, |source, output| {
-    for i in 0..source.height {
-        for j in 0..source.width {
-            source.prefix_rules(i, j, output)?;
-            output.finish_cell()?;
+schedule!(
+    AlignmentGrid<'_>,
+    Align,
+    |source, output| {
+        for i in 0..source.height {
+            for j in 0..source.width {
+                source.prefix_rules(i, j, output)?;
+                output.finish_cell()?;
+            }
         }
+        Ok(())
+    },
+    |source| ParallelLayout::PrefixGrid {
+        height: source.height,
+        width: source.width,
     }
-    Ok(())
-});
+);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LocalAlign {

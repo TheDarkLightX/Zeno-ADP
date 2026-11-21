@@ -32,7 +32,25 @@ Its Rust differential grid uses independent explicit products and
 leave-one-factor-out sums. `GeneratedRanks.lean` checks descent in the
 prefix and end-major interval layouts over natural numbers. The
 `GeneratedRanks.pivot_children_from_offsets` equality relates offset
-traversal to the two interval child ranks.
+traversal to the two interval child ranks. `TrackRanks.predecessor_rank`
+gives the stride subtraction at an enabled mixed-radix step.
+`TrackRanks.predecessor_descends` gives strict descent when the lag is
+positive. These are natural-number rank formulas. The Rust grids separately
+check layout binding and emitted child ranks.
+`Wavefront.lean` proves that coordinate predecessors lie in an earlier
+tile wave or the same tile, where row-major rank descends. It also proves
+length descent for generated pivots and Nussinov children. The Rust tests
+check table results and error precedence for the threaded scheduler.
+`ChildSequence.project_enabled` recovers the original list from an
+all-present list of optional child summaries. `ChildSequence.project_disabled`
+returns absence after a failed presence check. `ChildSequence.remaining_count`
+gives the exact remaining list length. Rust tests exercise iterator hints,
+rule order and table results against the ordered chart.
+`JointRetention.keep_iff_future_read_or_request` characterizes whether an
+inhabited summary at a completed rank must be retained, given its
+structural reads and an output request. The same rule applies separately
+to each algebra. The Rust grid checks the two projections and retained
+value counts against a census of explicit future reads.
 `ProductProvenance.lean` proves row-major rank descent for the grammar
 product and preservation of strict pair dominance under integer
 translation. Its projection theorem maps a ranked mathematical table

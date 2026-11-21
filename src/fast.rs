@@ -10,7 +10,7 @@ mod tree_product;
 
 pub use alignment_path::{alignment_linear_space, AlignmentPath};
 pub use backtrack::{BestTable, Recovery};
-pub(crate) use stream::fold_rule;
+pub(crate) use stream::{fold_present, fold_rule};
 pub use stream::{reference_chart, tabulate, Fold, RuleSource, Table};
 
 pub use tree_product::{OptimalTrees, ScoreTrees};

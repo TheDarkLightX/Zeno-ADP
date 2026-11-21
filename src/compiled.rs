@@ -1,16 +1,19 @@
-//! Ordered production schedules, table filling and replay for sequence grammars.
+//! Ordered production schedules, table filling and replay for ranked grammars.
 
 #[doc(hidden)]
 pub mod generated;
 mod grammar_macro;
+mod parallel;
+mod selection;
 mod sequence;
 
+pub use parallel::tabulate_parallel;
+pub(crate) use parallel::Layout as ParallelLayout;
+pub use selection::{tabulate_joint, tabulate_root, tabulate_selected, JointSelection, Selection};
 pub use sequence::{
     Atom, Grammar, Matched, Nonterminal, Production, Sequence, SequenceConstructor, TokenAtom,
     TokenGrammar, TokenMatched, TokenProduction, TokenSequence,
 };
-
-use std::collections::BTreeMap;
 
 use crate::algebras::{Additive, ScoredOperator};
 use crate::fast::{BestTable, Fold, RuleSource, Table};
@@ -32,7 +35,13 @@ pub trait ProductionSink<O> {
 }
 
 pub(crate) mod sealed {
-    pub trait Sealed {}
+    pub trait Sealed {
+        // An associated function keeps internal dispatch out of downstream
+        // method lookup through the public Program bound.
+        fn parallel_layout(_: &Self) -> super::ParallelLayout<'_> {
+            super::ParallelLayout::Replay
+        }
+    }
 }
 
 /// An input-bound grammar with a compiled, dependency-ordered schedule.
@@ -43,8 +52,15 @@ pub trait Program: RuleSource + sealed::Sealed {
 }
 
 macro_rules! schedule {
-    ($source:ty, $op:ty, |$grammar:ident, $output:ident| $body:block) => {
-        impl $crate::compiled::sealed::Sealed for $source {}
+    ($source:ty, $op:ty, |$grammar:ident, $output:ident| $body:block
+        $(, |$owner:ident| $layout:expr)?) => {
+        impl $crate::compiled::sealed::Sealed for $source {
+            $(
+                fn parallel_layout($owner: &Self) -> $crate::compiled::ParallelLayout<'_> {
+                    $layout
+                }
+            )?
+        }
         impl $crate::compiled::Program for $source {
             fn fill(
                 &self,
@@ -110,8 +126,7 @@ pub fn reference_chart<G: Program>(grammar: &G) -> Result<Chart<G::Op>, Error> {
 }
 
 /// Fill all logical cells in rank order without retaining productions.
-/// The fold must implement its corresponding reference algebra's choice
-/// and have at most one summary per cell.
+/// The algebra must satisfy the ordered, deterministic [`Fold`] contract.
 pub fn tabulate<G: Program, A: Fold<G::Op>>(
     grammar: &G,
     algebra: &A,
@@ -144,16 +159,38 @@ impl<O, A: Fold<O>> ProductionSink<O> for Tabulation<'_, A::Value, A> {
         operator: O,
         children: [Cell; N],
     ) -> Result<(), Error> {
-        if let [child] = children.as_slice() {
-            let value = self.cells[*child].as_ref();
-            crate::fast::fold_rule(
+        // Fixed-arity rules can check presence once and feed their exact
+        // child count directly to the fold.
+        match children.as_slice() {
+            [] => crate::fast::fold_present(
                 self.algebra,
                 &mut self.chosen,
                 &operator,
-                std::iter::once(value),
-            )
-        } else {
-            self.rule_slice(site, operator, &children)
+                std::iter::empty(),
+            ),
+            [child] => {
+                if let Some(value) = self.cells[*child].as_ref() {
+                    crate::fast::fold_present(
+                        self.algebra,
+                        &mut self.chosen,
+                        &operator,
+                        std::iter::once(value),
+                    )?;
+                }
+                Ok(())
+            }
+            [left, right] => {
+                if let (Some(left), Some(right)) = (&self.cells[*left], &self.cells[*right]) {
+                    crate::fast::fold_present(
+                        self.algebra,
+                        &mut self.chosen,
+                        &operator,
+                        [left, right].into_iter(),
+                    )?;
+                }
+                Ok(())
+            }
+            _ => self.rule_slice(site, operator, &children),
         }
     }
 
@@ -167,92 +204,10 @@ impl<O, A: Fold<O>> ProductionSink<O> for Tabulation<'_, A::Value, A> {
         )
     }
 
+    #[inline]
     fn finish_cell(&mut self) -> Result<(), Error> {
         self.cells
             .push(std::mem::replace(&mut self.chosen, Ok(None))?);
-        Ok(())
-    }
-}
-
-/// Fill every logical cell, retaining its summary only through its last
-/// scheduled read. Return the root summary, if inhabited.
-///
-/// A preliminary replay validates the schedule and plans retention without
-/// storing productions. The constructor callbacks must be deterministic.
-/// The observer sees each completed cell in rank order, including absent
-/// cells. An evaluation error can follow observations of earlier cells.
-/// Prefer [`tabulate`] for table inspection or [`best`] for tree recovery.
-pub fn tabulate_root<G: Program, A: Fold<G::Op>>(
-    grammar: &G,
-    algebra: &A,
-    observe: impl FnMut(Cell, Option<&A::Value>),
-) -> Result<Option<A::Value>, Error> {
-    let mut last_use = reserve_table(grammar.cell_count())?;
-    last_use.extend(0..grammar.cell_count());
-    replay(grammar, |cell, _, _, _, children| {
-        for &child in children {
-            last_use[child] = cell;
-        }
-        Ok(())
-    })?;
-    let mut sink = LiveTabulation {
-        root: grammar.root(),
-        cell: 0,
-        last_use,
-        live: BTreeMap::new(),
-        retire: Vec::new(),
-        chosen: Ok(None),
-        algebra,
-        observe,
-    };
-    grammar.fill(&mut sink)?;
-    Ok(sink.live.remove(&sink.root))
-}
-
-struct LiveTabulation<'a, V, A, F> {
-    root: Cell,
-    cell: Cell,
-    last_use: Vec<Cell>,
-    live: BTreeMap<Cell, V>,
-    retire: Vec<Cell>,
-    chosen: Result<Option<V>, Error>,
-    algebra: &'a A,
-    observe: F,
-}
-
-impl<O, A: Fold<O>, F: FnMut(Cell, Option<&A::Value>)> ProductionSink<O>
-    for LiveTabulation<'_, A::Value, A, F>
-{
-    fn rule_slice(&mut self, _: &str, operator: O, children: &[Cell]) -> Result<(), Error> {
-        crate::fast::fold_rule(
-            self.algebra,
-            &mut self.chosen,
-            &operator,
-            children.iter().map(|child| self.live.get(child)),
-        )?;
-        for &child in children {
-            if child != self.root && self.last_use[child] == self.cell {
-                self.retire.push(child);
-                // Repeated child ranks must remain readable until the whole
-                // cell has finished. Schedule each retirement only once.
-                self.last_use[child] = child;
-            }
-        }
-        Ok(())
-    }
-
-    fn finish_cell(&mut self) -> Result<(), Error> {
-        let next = std::mem::replace(&mut self.chosen, Ok(None))?;
-        for child in self.retire.drain(..) {
-            self.live.remove(&child);
-        }
-        (self.observe)(self.cell, next.as_ref());
-        if self.cell == self.root || self.last_use[self.cell] > self.cell {
-            if let Some(value) = next {
-                self.live.insert(self.cell, value);
-            }
-        }
-        self.cell += 1;
         Ok(())
     }
 }
