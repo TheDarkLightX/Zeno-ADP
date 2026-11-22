@@ -1,10 +1,13 @@
 # Zeno-ADP
 
-Zeno-ADP is a Rust library for algebraic dynamic programming. A grammar
+Zeno-ADP is a Rust library for algebraic dynamic programming (ADP). A grammar
 builds candidate trees. Algebras ask questions about those trees, including
 the minimum or maximum score, counts, Pareto fronts and distributions over
 derivations. The query guide lists what each algebra counts and how to
-check its answers. [Query guide](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.5.0/docs/QUESTIONS.md)
+check its answers. [Query guide](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.6.0/docs/QUESTIONS.md)
+
+Here, ≈DP (read “approximate DP”) means approximate dynamic programming,
+and adaptive dynamic programming is written in full.
 
 ## Installation
 
@@ -12,7 +15,7 @@ Add the crate to your application's `Cargo.toml`.
 
 ```toml
 [dependencies]
-zeno-adp = "0.5.0"
+zeno-adp = "0.6.0"
 ```
 
 ## Find the cheapest matrix parenthesization
@@ -64,8 +67,8 @@ the one-worker median. Answers agreed at every worker count.
 | Nussinov, 700 bases | 1.46× | 2.12× | 2.53× |
 
 [Compiler guide](docs/COMPILER.md) ·
-[Streaming and recovery](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.5.0/docs/FAST.md) ·
-[Forests, crossings and sets](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.5.0/docs/STRUCTURES.md)
+[Streaming and recovery](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.6.0/docs/FAST.md) ·
+[Forests, crossings and sets](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.6.0/docs/STRUCTURES.md)
 
 Build an alignment grammar from two ranked prefix grammars with
 `grammars::PrefixProduct`. For one minimum-cost unit alignment,
@@ -80,10 +83,11 @@ table, as does `first_minimum_tree`. Both rank in ascending score order
 and keep first derivation order for ties. `Count` counts occurrences.
 `Classes` lists distinct keys. `Classified` applies a question per key
 and may return several pairs per key.
-[Ranking contracts](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.5.0/docs/QUESTIONS.md#ranking-trees)
+[Ranking contracts](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.6.0/docs/QUESTIONS.md#ranking-trees)
 
 `ParetoWitnesses` retains every non-dominated derivation in order for two
-fixed additive costs with representable ordered sums. `Provenance`
+fixed additive costs with representable ordered sums. Filter by a resource
+budget to recover an exact feasible minimum when one exists. `Provenance`
 counts derivation label multisets. Substitute one fixed weight per label
 in a lawful commutative semiring to reuse the polynomial.
 [Question guide](docs/QUESTIONS.md)
@@ -96,6 +100,10 @@ expected feature or log-partition derivative. `ExactSampler` uses independent un
 Equal returned terms collect their derivation masses. Binary64 log
 algebras support approximate evaluations. Use exact arithmetic for
 equality audits. [Weighted questions](docs/QUESTIONS.md#partition-functions-and-sampling)
+
+For finite-horizon expectimax, use a weighted rule per action and maximize
+over actions to find the exact expected utility.
+[Expectimax recipe](docs/COOKBOOK.md#finite-horizon-expectimax)
 
 ## Measured structural table timings
 
@@ -137,15 +145,15 @@ operations on discarded branches and on every cell evaluated.
 Rust's reference table was finite checked against that specification on
 1,892 charts covering short folding, alignment, matrix-chain and knapsack
 inputs and a four-cell fixture. The audit guide gives the exact domains
-and five answers compared at each rank. [Audit guide](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.5.0/docs/AUDIT.md#verification-scope)
+and five answers compared at each rank. [Audit guide](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.6.0/docs/AUDIT.md#verification-scope)
 
 Run `cargo run --offline --locked --example matrix_chain` from the checkout.
-Run `cargo run --offline --locked --example cookbook` for 22 recipes
+Run `cargo run --offline --locked --example cookbook` for 24 recipes
 with direct checks on raw inputs. [Cookbook](docs/COOKBOOK.md) · [Examples](examples/)
 
-[API documentation](https://docs.rs/zeno-adp/0.5.0/zeno_adp/) · [MIT license](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.5.0/LICENSE)
+[API documentation](https://docs.rs/zeno-adp/0.6.0/zeno_adp/) · [MIT license](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.6.0/LICENSE)
 
-See the changelog when upgrading from 0.4.0, 0.3.0 or 0.1.0. [Changelog](CHANGELOG.md) · [Release 0.5.0](https://github.com/TheDarkLightX/Zeno-ADP/releases/tag/v0.5.0)
+See the changelog for upgrade notes from earlier versions. [Changelog](CHANGELOG.md) · [Release 0.6.0](https://github.com/TheDarkLightX/Zeno-ADP/releases/tag/v0.6.0)
 
 ## Acknowledgements
 

@@ -1,4 +1,4 @@
-//! Algebraic dynamic programming over finite, ranked tree grammars.
+//! Algebraic dynamic programming (ADP) over finite, ranked tree grammars.
 //!
 //! Define a signature with [`Operator`], instantiate a [`Chart`] from your input,
 //! and interpret its rules with an [`Algebra`]. Use [`exhaustive`] for end-only

@@ -87,7 +87,7 @@ private theorem bag_front_covers {xs ys : List Score}
     (selection : ∀ a, a ∈ ys ↔ OnFront xs a) : Covers ys xs Below :=
   fun a ha => ⟨a, ((selection a).mp ha).1, below_refl a⟩
 
-private theorem cover_append {w x y z : List A} {rel : A → A → Prop}
+theorem cover_append {w x y z : List A} {rel : A → A → Prop}
     (first : Covers w y rel) (second : Covers x z rel) :
     Covers (w ++ x) (y ++ z) rel := by
   intro a ha
@@ -109,7 +109,7 @@ def Pointwise (p : A → A → Prop) : List A → List A → Prop
   | a :: as, b :: bs => p a b ∧ Pointwise p as bs
   | _, _ => False
 
-private theorem cover_product (rel : A → A → Prop)
+theorem cover_product (rel : A → A → Prop)
     (xs ys : List (List A))
     (covered : Pointwise (fun x y => Covers x y rel) xs ys) :
     Covers (tuples xs) (tuples ys) (Pointwise rel) := by
@@ -471,6 +471,17 @@ theorem order_reversal_counterexample :
     Below (0, 0) (2, 0) ∧ ¬Below (-(0 : Int), 0) (-(2 : Int), 0) := by
   simp [Below]
 
+/-- The middle offer (cost 3, spend 2) cannot minimize cost plus any rational
+multiplier n/d times spend against both (cost 0, spend 4) and (cost 4, spend 0).
+All comparisons are scaled by the positive denominator. -/
+theorem budget_middle_unsupported (n d : Int) (positive : 0 < d) :
+    ¬ (3 * d + 2 * n ≤ 4 * n ∧ 3 * d + 2 * n ≤ 4 * d) := by omega
+
+/-- At budget two, one endpoint bounds the relaxation by two for every n/d
+with positive denominator. The endpoints tie when n = d. -/
+theorem budget_dual_upper_bound (n d : Int) :
+    4 * n - 2 * n ≤ 2 * d ∨ 4 * d - 2 * n ≤ 2 * d := by omega
+
 end BellmanFrontiers
 
 #print axioms BellmanFrontiers.front_covers
@@ -486,3 +497,5 @@ end BellmanFrontiers
 #print axioms BellmanFrontiers.pareto_eq_exhaustive
 #print axioms BellmanFrontiers.contraction_counterexample
 #print axioms BellmanFrontiers.order_reversal_counterexample
+#print axioms BellmanFrontiers.budget_middle_unsupported
+#print axioms BellmanFrontiers.budget_dual_upper_bound

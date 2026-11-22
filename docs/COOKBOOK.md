@@ -1,8 +1,9 @@
 # Cookbook
 
 Run the examples together with `cargo run --example cookbook`. Each
-recipe compares a grammar and its answer algebra with a direct calculation
-on the input. The checks use short inputs so they can also inspect
+algebraic dynamic programming (ADP) recipe compares a grammar and its
+answer algebra with a direct calculation on the input. The checks use
+short inputs so they can also inspect
 individual candidates. In the output, a *fast value comparison* compares
 one compiled or specialized table value with the reference evaluator at
 the same rank, including empty cells. Run the same assertions with
@@ -12,6 +13,81 @@ The direct calculations read the raw inputs. Some checks share model
 constants, exact rational arithmetic, or the library's rank-to-coordinate
 mapping. The tables describe which checks use independent recurrences
 or enumeration, and which compare two library evaluators.
+
+## Budgeted plans from a Pareto front
+
+**Exact.** Choose one offer at each stage. Each offer has a cost and a
+resource spend. Build one cell per prefix, with one unary rule per offer
+extending the previous prefix. Use `ParetoWitnesses` to minimize cost and
+spend together and retain the chosen plans. At the final cell, filter by
+`spend <= budget`, then take the smallest cost. An empty filtered front
+means the budget is infeasible. Discarding a dominated point is sound
+because its dominator spends no more and costs no more. Adding the same
+offer preserves those comparisons at the next stage.
+
+For one stage, use the offers `(cost, spend)` = `(0,4)`, `(3,2)`,
+`(4,0)` and `(5,2)`. At budget 2, the optimum is the offer `(3,2)`.
+It is the average of the other three points and lies strictly inside
+their triangle. At spend 2, the lower convex edge between `(0,4)`
+and `(4,0)` has cost 2, below this attainable optimum.
+
+For a multiplier `λ >= 0`, the Lagrangian relaxation minimizes
+`cost + λ(spend − 2)`. The endpoint offers give `2λ` and `4 − 2λ`.
+Their minimum is at most 2 for every multiplier. The constrained optimum
+always gives 3, so no multiplier selects it, even at a tie. At `λ = 1`
+the endpoints tie and the lower bound is 2. On the Pareto front, a linear
+objective selects only supported points of the lower hull. The front retains
+unsupported trade-offs such as `(3,2)`.
+
+The executable recipe uses a separate budget-indexed recurrence.
+For each prefix and allowance `b`, take the minimum of an offer's cost
+plus the preceding prefix minimum at `b − spend` over affordable offers.
+An empty prefix costs zero. A second direct recurrence keeps minima by
+exact spend to check the full front, and each retained tree is replayed
+against the raw menu. [Rust recipe](../examples/cookbook/budget.rs)
+
+## Finite-horizon expectimax
+
+**Exact.** Find the highest expected utility with a fixed number of
+decisions left. A terminal rule supplies its utility. For each action,
+put all its possible outcomes in one rule, in the same order as their
+probabilities. The constructor returns the weighted sum of its child
+utilities. At a decision cell, one unary rule per action returns that
+action's utility. Use maximum as the algebra's choice at every cell.
+At a chance cell the alternative bag contains one weighted result
+per tuple of continuations. At a decision cell the alternatives are actions.
+
+Rank cells by decisions remaining, with each action's chance cell before
+its decision cell. The state should determine available actions,
+transition probabilities and future rewards. After an observed outcome,
+the continuation can choose an action for the resulting state. In a
+finite tree, a derivation represents a contingent plan with a branch
+for each outcome. This recipe covers fully observed finite horizons.
+Infinite-horizon Markov decision processes are outside its scope.
+
+Use nonnegative rational probabilities that sum to one. Increasing a
+child utility cannot decrease its weighted sum, so choosing a child
+maximum early preserves the parent's maximum. Taking the maximum of
+group maxima also preserves the result, and empty bags stay empty.
+These are the Bellman conditions checked by `audit_bounded` on the
+reference chart. Each emitted child must have a feasible continuation.
+Zero-probability outcomes may be left out when constructing the rule.
+
+The example uses `BigRational` for nonnegative utilities and
+probabilities. With signed terminal utilities, add one common shift to
+make them nonnegative and subtract it after evaluation. A normalized
+expectation and maximum both preserve that shift. For additive rewards,
+either accumulate them into terminal utilities in the state or use
+an exact signed carrier that adds the local reward at each action.
+
+In the two-decision example, terminal utilities are 0 and 3. State 0's
+actions reach state 1 with probabilities 1/3 and 0. State 1's actions
+reach it with probabilities 0 and 2/3. With one decision left the
+state utilities are 1 and 2. With two left, the start in state 1 has
+value `(1/3)·1 + (2/3)·2 = 5/3`. The direct recurrence adds one
+continuation value per equiprobable ticket, scales the common denominator,
+and maximizes over actions. It checks every terminal, chance and decision
+cell. [Rust recipe](../examples/cookbook/expectimax.rs)
 
 ## Intervals
 

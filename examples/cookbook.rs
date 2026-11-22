@@ -1,7 +1,11 @@
-//! Run the 22 recipes with `cargo run --example cookbook`.
+//! Run the recipes with `cargo run --example cookbook`.
 
 #[path = "cookbook/alignment.rs"]
 mod alignment;
+#[path = "cookbook/budget.rs"]
+mod budget;
+#[path = "cookbook/expectimax.rs"]
+mod expectimax;
 #[path = "cookbook/forests.rs"]
 mod forests;
 #[path = "cookbook/intervals.rs"]
@@ -25,6 +29,8 @@ struct Checks {
     inputs: usize,
     ranks: usize,
     fast_values: usize,
+    oracle_values: usize,
+    audited_nodes: usize,
 }
 
 impl Checks {
@@ -111,7 +117,7 @@ fn words<T: Copy>(alphabet: &[T], max_len: usize) -> Vec<Vec<T>> {
 type Recipe = (&'static str, fn() -> Result<Checks, Error>);
 
 fn main() -> Result<(), Error> {
-    let recipes: [Recipe; 22] = [
+    let recipes: &[Recipe] = &[
         ("Arithmetic parenthesization", intervals::arithmetic),
         ("Minimum matrix-chain work", intervals::matrix_chain),
         ("Matrix work and memory", intervals::matrix_frontier),
@@ -134,8 +140,10 @@ fn main() -> Result<(), Error> {
         ("Noncrossing paired-count folding", structures::nussinov),
         ("Folds by shape", structures::shapes),
         ("Two crossing pairs", structures::single_crossing),
+        ("Budgeted plans from a Pareto front", budget::budgeted_plans),
+        ("Finite-horizon expectimax", expectimax::finite_horizon),
     ];
-    for (index, (name, run)) in recipes.into_iter().enumerate() {
+    for (index, (name, run)) in recipes.iter().enumerate() {
         let checks = run()?;
         println!(
             "{:02} | {name} | {} inputs | {} reference ranks | {} fast value comparisons",
@@ -144,6 +152,12 @@ fn main() -> Result<(), Error> {
             checks.ranks,
             checks.fast_values
         );
+        if checks.oracle_values != 0 {
+            println!(
+                "   | {} direct comparisons | {} audited constructor occurrences",
+                checks.oracle_values, checks.audited_nodes
+            );
+        }
     }
     Ok(())
 }

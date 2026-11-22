@@ -29,7 +29,15 @@ local cancellation of the remaining suffix mass in exact sampling.
 `BellmanExpectation.lean` proves the expectation pair's Bellman
 obligations over rational components and exact equality at every rank.
 Its Rust differential grid uses independent explicit products and
-leave-one-factor-out sums. `GeneratedRanks.lean` checks descent in the
+leave-one-factor-out sums. `BellmanExpectimax.tabulate_eq_policy_max`
+proves equality with exhaustive policy evaluation at every rank for
+affine rational constructors with nonnegative coefficients and scalar
+maximum choice. A chance rule uses one coefficient per outcome.
+Normalizing those coefficients gives the expectation interpretation.
+The cookbook separately checks the Rust recipe against a raw integer
+recurrence over equiprobable tickets.
+
+`GeneratedRanks.lean` checks descent in the
 prefix and end-major interval layouts over natural numbers. The
 `GeneratedRanks.pivot_children_from_offsets` equality relates offset
 traversal to the two interval child ranks. `TrackRanks.predecessor_rank`
@@ -70,7 +78,11 @@ canonical polynomial construction and projection.
 set equalities and proves the integer additive operator preserves the
 required order. The ranked Pareto theorem assumes that the chooser
 uses a canonical representation of the front set. The ordered Δ theorem
-covers constructors with a fixed additive weight plus the child scores. `DistinctIntersections.lean` checks the cancellation identity
+covers constructors with a fixed additive weight plus the child scores.
+`BellmanFrontiers.budget_middle_unsupported` and
+`BellmanFrontiers.budget_dual_upper_bound` check the rational multiplier
+comparisons for the cookbook's discrete budget example.
+`DistinctIntersections.lean` checks the cancellation identity
 per tree after grouping by its accepting alternatives.
 
 `Structures.lean` checks size descent for promotion and gap splits, the

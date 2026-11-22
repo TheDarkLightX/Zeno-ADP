@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.0
+
+- The algebraic dynamic programming (ADP) cookbook has 24 recipes.
+  The budgeted planning recipe finds an exact optimum from the Pareto front
+  and compares it with the lower bound from a Lagrangian relaxation.
+  The expectimax recipe computes maximum expected utility over a finite
+  horizon with exact rational arithmetic.
+- The README distinguishes ADP from approximate dynamic programming (≈DP)
+  and adaptive dynamic programming.
+
+### Upgrading from 0.5.0
+
+- Set the dependency version to `0.6.0`. Use `ParetoWitnesses` for the
+  budgeted recipe and `Chart`, `Algebra` and `BigRational` to model
+  expectimax. Both recipes use the existing reference audit.
+  [Cookbook](docs/COOKBOOK.md)
+
 ## 0.5.0
 
 - Pack inhabited summaries by logical rank with `compiled::tabulate_compact`.

@@ -134,7 +134,7 @@ Bellman laws hold there. Three sufficient conditions are that choice
 preserves the empty bag, choosing each of two bags before merging them
 preserves the final choice, and choosing each child's bag before applying
 a constructor preserves the final choice over its results.
-[Tabulation theorem and premises](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.5.0/verification/BellmanTabulation.lean)
+[Tabulation theorem and premises](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.6.0/verification/BellmanTabulation.lean)
 
 The Rust reference table was finite checked against the mathematical table
 after grammar emission on the following domains. Length bounds include
@@ -155,4 +155,4 @@ total counts, and lexicographic minimum. Enumeration replaced distinct
 constructor payloads with IDs. Lexicographic minimum used a secondary
 additive cost derived from the ID and omitted infinite-weight rules.
 For a new grammar or algebra, run the bounded audit on its own inputs.
-[Verification sources](https://github.com/TheDarkLightX/Zeno-ADP/tree/v0.5.0/verification)
+[Verification sources](https://github.com/TheDarkLightX/Zeno-ADP/tree/v0.6.0/verification)
