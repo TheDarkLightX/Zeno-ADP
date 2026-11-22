@@ -24,6 +24,9 @@ incomplete. See [Evaluating and auditing a grammar](AUDIT.md).
 | Big-integer partition or best weight | `SemiringAlgebra::new` with `BigSumProduct` or `BigMaxProduct`. Reduced `BigRational`. | Occurrence mass, including inhabited zero. | Sum or maximum of nonnegative derivation weights. | Audit the big-integer algebra on the reference chart. |
 | Expected additive feature or directional derivative | `Expectation`, with an exact mass and signed first-order component per constructor. Checked rational operations. | Derivation occurrences, including zero-mass occurrences with nonzero derivatives. | Sum mass and component, then optionally normalize. | Audit `Expectation` on the reconstructed or explicit chart. |
 | Maximum expected utility over a finite horizon | `Chart`, an `Algebra` for weighted chance rules and maximum choice, and `BigRational` for nonnegative utilities. | One value per state or action. A derivation represents a contingent plan. | Sum over the outcomes of each action, then maximize over actions. | Audit the weighted-choice algebra on the explicit reference chart. [Expectimax](COOKBOOK.md#finite-horizon-expectimax) |
+| Maximum discounted reward over an infinite horizon | `mdp::Model` with signed exact rationals. | A stationary policy and the value of each state. | Maximize actions after each transition expectation. | Check policy equality and every action inequality. [Discounted MDPs](EXACT.md#discounted-markov-decision-processes) |
+| Finite derivation existence or minimum nonnegative cost on a cyclic chart | `cyclic::GroundChart`. Rules carry nonnegative `BigUint` weights. Boolean ignores them and min-plus sums them. | One value and ranked witness per inhabited cell. | Least fixed point in the semiring order. | Check every ground equation and witness rank. [Cyclic grammars](EXACT.md#cyclic-grammars) |
+| Minimum cost of binary factors given a tree decomposition | `decomposition::Compiled` with signed integer costs and local feasibility. | All bag and separator scores and one original assignment when feasible. | Minimize compatible bag extensions. | Check every bag and separator equation and rescore the lifted assignment. Use the explicit ranked chart for the Bellman audit. [Tree decompositions](EXACT.md#supplied-tree-decompositions) |
 | Approximate log weights | `LogSumProduct`, `LogMaxProduct`, `log_inside_outside`. Binary64. | Occurrence mass in log space. | Log-sum-exp for totals, descending log weight for maxima. | Use exact algebras for equality audits. Compare log results with a domain-specific error allowance. |
 | Sample a weighted tree | `ExactSampler`. Checked rational branch probabilities and independent uniform `u64` words. | Draw a derivation. Equal returned terms collect occurrence masses. | Sample, with no score ordering. | Audit `SumProduct` for inside mass. Check sampling separately against exact derivation probabilities. |
 | Distinct binary count or intersection | `BinaryTreeGrammar::distinct_counts`. Checked `u128` acceptance buckets. | Ordered tree terms at an exact leaf count. | None. | Compare profiles to explicit term sets on reference charts. Audit their derivation algebra separately. |
@@ -198,7 +201,7 @@ its fixed integer weight plus its child scores. For pairs of integers,
 the Pareto theorem requires componentwise monotone constructors and a
 chooser that preserves the empty bag and returns exactly the front in a
 canonical order. Both equalities hold at every in-bounds rank.
-[Score-band and Pareto theorems](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.6.0/verification/BellmanFrontiers.lean)
+[Score-band and Pareto theorems](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.7.0/verification/BellmanFrontiers.lean)
 
 ## Rule-label provenance
 

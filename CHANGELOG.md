@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.7.0
+
+- Solve finite discounted Markov decision processes over signed rational
+  rewards and independently verify the returned policy and every state value.
+- Give finite grounded cyclic grammars **Exact** Boolean and nonnegative
+  min-plus answers with ranked derivation witnesses.
+- Compile supplied tree decompositions for binary factor problems into ranked
+  separator tables. Run the weighted independent-set ladder example to see
+  an **Exact** optimum with a lifted original assignment.
+  Its weight conversion covers the full `i64` range. Certificate replay
+  checks factors and child messages directly in rank order.
+- Algebraic dynamic programming (ADP) refers to grammar and algebra evaluation.
+  Approximate dynamic programming is ≈DP. Adaptive dynamic programming is
+  written in full.
+
+### Upgrading from 0.6.0
+
+- Set the dependency version to `0.7.0`. Existing ranked grammar and
+  finite-horizon expectimax calls continue to use their existing APIs.
+- The new modules use their own types and validation errors. Use
+  `mdp::Rational` for signed model inputs. Use `cyclic::GroundChart` when
+  productions can refer back to a cell, and `decomposition::Compiled` when
+  given a tree decomposition for a binary factor model.
+  [Exact query guide](docs/EXACT.md)
+
 ## 0.6.0
 
 - The algebraic dynamic programming (ADP) cookbook has 24 recipes.

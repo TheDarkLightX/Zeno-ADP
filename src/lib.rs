@@ -1,4 +1,4 @@
-//! Algebraic dynamic programming (ADP) over finite, ranked tree grammars.
+//! Algebraic dynamic programming (ADP) over finite tree grammars.
 //!
 //! Define a signature with [`Operator`], instantiate a [`Chart`] from your input,
 //! and interpret its rules with an [`Algebra`]. Use [`exhaustive`] for end-only
@@ -9,11 +9,14 @@ pub mod algebras;
 mod audit;
 pub mod classification;
 pub mod compiled;
+pub mod cyclic;
+pub mod decomposition;
 pub mod distinct;
 pub mod fast;
 pub mod forests;
 pub mod grammars;
 pub mod mcfg;
+pub mod mdp;
 pub mod probability;
 pub mod provenance;
 pub mod queries;
@@ -26,6 +29,34 @@ pub use audit::{
 
 use std::collections::BTreeMap;
 use std::fmt::Debug;
+
+/// A result checked against the model and semantics of the solver that returned it.
+/// The certificate can be borrowed or extracted for independent replay.
+///
+/// ```compile_fail
+/// // Only a solver can attach this label to its checked result.
+/// let _ = zeno_adp::Exact(vec![123]);
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Exact<T>(T);
+
+impl<T> Exact<T> {
+    pub fn label(&self) -> &'static str {
+        "Exact"
+    }
+
+    /// Extract the raw certificate. Replay it against the intended model
+    /// after transfer or editing.
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
+
+impl<T> AsRef<T> for Exact<T> {
+    fn as_ref(&self) -> &T {
+        &self.0
+    }
+}
 
 pub type Cell = usize;
 

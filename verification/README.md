@@ -143,3 +143,16 @@ arithmetic comparisons require every relevant ordered intermediate to
 be representable, including on derivations discarded by early choice.
 The audit guide covers bounded arithmetic and operator checks on actual
 inputs. [Audit guide](../docs/AUDIT.md)
+
+## Exact profiles
+
+`ExactProfiles.lean` checks three mathematical obligations. The cyclic
+certificate characterizes all finite natural-cost derivations through
+production inequalities and strictly decreasing witness ranks. The
+discounted certificate bounds finite policy prefixes ending at its value,
+attains that bound under its selected policy, and gives uniqueness under
+a contraction premise. The separator lemmas check local compatibility,
+preservation of the sum of local costs and uniqueness of a table satisfying
+equations that only read earlier ranks. The Rust tests separately compare
+arithmetic, rank emission, tree admission and lifted assignments on the
+domains in [the Exact query guide](../docs/EXACT.md).
