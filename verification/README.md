@@ -156,3 +156,37 @@ preservation of the sum of local costs and uniqueness of a table satisfying
 equations that only read earlier ranks. The Rust tests separately compare
 arithmetic, rank emission, tree admission and lifted assignments on the
 domains in [the Exact query guide](../docs/EXACT.md).
+
+## Common optima, robust prefixes and history state
+
+`MetaCommon.lean` works over the ranked chart model of
+`BellmanTabulation.lean`. Given per-model cell values that satisfy every cell
+equation, it proves that each value is a lower bound attained by some
+derivation, and that a derivation's cost equals the value exactly when no
+derivation of the same cell costs less. `restrict_unfold_optimal` states that
+the chart keeping, at each cell, only the rules that attain the value in every
+selected model has exactly the derivations optimal in all selected models, in
+the same order and with the same multiplicities. `tie_set_lower_bound` states
+that a summary answering every singleton question about an arbitrary nonempty
+tie set over `R ≥ 2` rules needs at least `R` bits.
+
+`MetaRobust.lean` takes `V` to be any function and defines a prefix's regret
+as its cost plus `V` at its end minus `V` at its start. That this equals the
+cost of the best plan extending the prefix minus the optimum, when `V` is each
+world's least finishing cost, is not proved there; the Rust certificate checks
+that `V` satisfies every cell equation. The file proves that a prefix's regret
+in one world is the sum of its step slacks, that zero regret holds exactly when every step has zero slack
+given the Bellman inequality, and that a world's budget holds exactly when its
+slacks sum to at most the budget. Two decided examples show that one budget
+shared by two worlds is unsound when charged by the smaller slack and refuses
+feasible prefixes when charged by the larger one.
+
+`MetaQuotient.lean` proves that a class table satisfying the closure
+conditions gives every word the raw machine's score, that a closed and
+separated table is the Nerode equivalence and is refined by every closed table,
+that a check of every word up to length `L` fixes every score up to `L`, that
+a scorer of horizon `k'` violates a declared horizon `k ≤ k'` at a history of
+length at most `k'`, and that for every finite set of words and every
+`k`-local scorer there is a scorer that agrees on those words and is not
+`k`-local. These theorems are about the mathematical models; the Rust
+certificates check the same conditions on each instance.

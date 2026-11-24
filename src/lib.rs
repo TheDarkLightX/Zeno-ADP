@@ -6,8 +6,10 @@
 //! [`audit_bounded`] can check those laws on a concrete chart and report duplicates.
 
 pub mod algebras;
+pub mod assurance;
 mod audit;
 pub mod classification;
+pub mod common_optimum;
 pub mod compiled;
 pub mod cyclic;
 pub mod decomposition;
@@ -20,7 +22,9 @@ pub mod mdp;
 pub mod probability;
 pub mod provenance;
 pub mod queries;
+pub mod robust_prefix;
 pub mod sets;
+pub mod state_discovery;
 
 pub use audit::{
     audit, audit_bounded, audit_bounded_classified, grammar_growth, Ambiguity, AnswerOrder, Audit,
@@ -212,7 +216,7 @@ impl<O> Drop for Tree<O> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rule<O> {
     pub operator: O,
     pub children: Vec<Cell>,
@@ -228,7 +232,7 @@ impl<O> Rule<O> {
 }
 
 /// A finite, ordered instance of a grammar. Equal productions retain their multiplicity.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Chart<O> {
     cells: Vec<Vec<Rule<O>>>,
     root: Cell,

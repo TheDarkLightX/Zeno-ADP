@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.8.0
+
+- Find derivations that are optimal in several additive cost models at once.
+  `common_optimum::common` answers existence, the number of such derivations
+  and each one by rank, with a certificate replayed cell by cell. Keep
+  per-model optima, winner masks or an answer table for later questions.
+  An answer table stores counts. `AnswerTable::get` looks up a retained
+  count with no budget; `AnswerTable::answer` declines an unlisted selection
+  with a generic collision when it fits the caller's construction budget.
+- Commit to plan prefixes that keep an optimal completion in every world, or
+  a completion within a regret budget per world, with `robust_prefix`.
+  The caller's state limit counts pending and memoized budget DP states
+  together, and live forward labels in a separate pass. `state_bound`
+  gives an upper bound for each pass.
+- Find the coarsest history state of a reachable raw model with
+  `state_discovery` and build an explicit chart. Generic geometries count
+  move derivations. A finite check validates scores through its length.
+  A chart's scorer label is Exact when the check belongs to the same raw
+  model and covers every candidate word length in the instance.
+- Use `verify_for` to bind replay to the requested selection or regret
+  budget. Common-optimum witness extraction and replay check the chart
+  equations first. Feature-set generation and verification take caller
+  limits, and malformed move symbols, features and refutations return errors.
+- Certificate metadata names the question, family, checking method and shape.
+  Checked solver returns carry `Exact<T>`. The chart answer records its
+  separate `scorer_label`, and witness and refutation assurance comes from replay.
+- Reproduce the retention figures of the guide with
+  `cargo run --offline --locked --release --example retention`.
+- `Chart` and `Rule` implement `PartialEq` and `Eq`.
+
+### Upgrading from 0.7.0
+
+- Existing APIs are unchanged. The new modules have their own error types.
+  [Exact query guide](docs/EXACT.md)
+
 ## 0.7.0
 
 - Solve finite discounted Markov decision processes over signed rational
