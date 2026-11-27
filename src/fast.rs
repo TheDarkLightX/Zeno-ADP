@@ -4,10 +4,10 @@
 //! tree recovery. Use [`reference_chart`] to evaluate general algebras and audit.
 
 mod alignment_path;
+mod backtrack;
 /// Optimum-unanimous interval decisions and single-row counterfactuals.
 pub mod interval_choice;
 pub mod interval_cover;
-mod backtrack;
 mod stream;
 mod tree_product;
 

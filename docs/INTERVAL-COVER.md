@@ -98,5 +98,5 @@ cargo run --release --offline --locked --example interval_cover_bench
 
 The final command times forced range against the chart. The `final-*.csv`
 tables record the CPU 22 replay. Uppercase CSV filenames preserve earlier
-synthetic measurements on an AMD EPYC 9V74, including the original
-range-only and 256-boundary implementations.
+synthetic measurements of the original range-only and 256-boundary
+implementations. The initial range-only benchmark ran on an AMD EPYC 9V74.
