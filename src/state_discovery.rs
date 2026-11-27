@@ -1196,7 +1196,7 @@ impl Exact<Quotient> {
     /// and, first at final cells, a finishing rule of the empty-word score. With
     /// `Sense::Maximize` the chart's costs are negated scores, so its minimum is the
     /// highest score. Negating a base or gain of `i64::MIN` used by a rule
-    /// returns [`Error::Overflow`](Error::Overflow).
+    /// returns [`Error::Overflow`].
     ///
     /// ```compile_fail
     /// // An unverified class table has no chart.
