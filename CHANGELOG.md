@@ -1,12 +1,14 @@
 # Changelog
 
-## 0.9 (unreleased)
+## 0.9.0 (unreleased)
 
 - Find the minimum cost and exact number of labelled interval covers, including
   under required and excluded rows. The sparse frontier promotes to a range
   tree at a measured width, with an explicit caller override.
 - Compute the optimum for every single include and exclude intervention in one
   reverse pass and report unanimous decisions. [Interval-cover guide](docs/INTERVAL-COVER.md)
+- Evaluate one matrix-chain chart for minimum work, derivation count and
+  parenthesizations in the [README example](README.md#parenthesize-three-matrices).
 
 ## 0.8.0
 
