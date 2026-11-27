@@ -10,6 +10,14 @@
 - Evaluate one matrix-chain chart for minimum work, derivation count and
   parenthesizations in the [README example](README.md#parenthesize-three-matrices).
 
+### Upgrading from 0.8.0
+
+- Set the dependency version to `0.9.0`.
+- `Tree::into_parts()` requires `O: Default` and drops a default operator.
+  For other payloads, call `tree.into_parts_with_replacement(replacement)`.
+  Safe extraction swaps out the root operator while preserving the public
+  fields and iterative destruction of deep trees.
+
 ## 0.8.0
 
 - Find derivations that are optimal in several additive cost models at once.

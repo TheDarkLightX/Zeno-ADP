@@ -5,6 +5,8 @@
 //! choice or [`tabulate`] to move choice to each subproblem when its laws hold.
 //! [`audit_bounded`] can check those laws on a concrete chart and report duplicates.
 
+#![forbid(unsafe_code)]
+
 pub mod algebras;
 pub mod assurance;
 mod audit;
@@ -190,17 +192,19 @@ pub struct Tree<O> {
 }
 
 impl<O> Tree<O> {
-    /// Move out the operator and children of an owned tree.
-    pub fn into_parts(self) -> (O, Vec<Self>) {
-        let tree = std::mem::ManuallyDrop::new(self);
-        // SAFETY: Each field is initialized and read exactly once. ManuallyDrop
-        // keeps the original tree from dropping either field after the move.
-        unsafe {
-            (
-                std::ptr::read(&tree.operator),
-                std::ptr::read(&tree.children),
-            )
-        }
+    /// Move out the operator and children, dropping a default operator in their place.
+    pub fn into_parts(self) -> (O, Vec<Self>)
+    where
+        O: Default,
+    {
+        self.into_parts_with_replacement(O::default())
+    }
+
+    /// Move out the operator and children, dropping the supplied replacement.
+    pub fn into_parts_with_replacement(mut self, replacement: O) -> (O, Vec<Self>) {
+        let operator = std::mem::replace(&mut self.operator, replacement);
+        let children = std::mem::take(&mut self.children);
+        (operator, children)
     }
 }
 

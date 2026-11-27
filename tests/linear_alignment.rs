@@ -137,7 +137,12 @@ fn tree_drop_visits_all_payloads_even_during_unwinding() {
             node(false, vec![node(false, vec![]), node(false, vec![])]),
         ],
     );
-    let (root, children) = tree.into_parts();
+    let replacement_drops = Cell::new(0);
+    let (root, children) = tree.into_parts_with_replacement(Payload {
+        drops: &replacement_drops,
+        panic: false,
+    });
+    assert_eq!(replacement_drops.get(), 1);
     assert_eq!(drops.get(), 0);
     assert_eq!(children.len(), 2);
     let rebuilt = Tree {

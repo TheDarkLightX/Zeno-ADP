@@ -344,6 +344,14 @@ impl<O: Operator, const TRACKS: usize, T: Eq, A: TrackAtom<T>> TokenGrammar<O, T
         &'a self,
         inputs: [&'a [T]; TRACKS],
     ) -> Result<TokenSequence<'a, O, TRACKS, T, A>, Error> {
+        self.bind_with_offsets(inputs, reserve_table)
+    }
+
+    fn bind_with_offsets<'a>(
+        &'a self,
+        inputs: [&'a [T]; TRACKS],
+        mut reserve_offsets: impl FnMut(usize) -> Result<Vec<usize>, Error>,
+    ) -> Result<TokenSequence<'a, O, TRACKS, T, A>, Error> {
         let mut boundaries = [0; TRACKS];
         let mut sizes = [0; TRACKS];
         let mut cell_count = self.order.len();
@@ -358,7 +366,7 @@ impl<O: Operator, const TRACKS: usize, T: Eq, A: TrackAtom<T>> TokenGrammar<O, T
 
         let mut offsets = std::array::from_fn(|_| Vec::new());
         for (offsets, boundaries) in offsets.iter_mut().zip(boundaries) {
-            *offsets = reserve_table(boundaries)?;
+            *offsets = reserve_offsets(boundaries)?;
             let mut next = 0;
             for length in 0..boundaries {
                 offsets.push(next);
@@ -820,5 +828,57 @@ impl<O: Operator, const TRACKS: usize, T: Eq, A: TrackAtom<T>> Program
 {
     fn fill(&self, output: &mut impl ProductionSink<O>) -> Result<(), Error> {
         self.fill_for_sink(output)
+    }
+}
+
+#[cfg(test)]
+mod layout_preflight {
+    use super::*;
+    use crate::grammars::Align;
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn overflowing_product_never_reserves_offsets() {
+        // Both span counts fit usize, while their product overflows on 64-bit targets.
+        const LONG: usize = 2_000_000;
+        const SHORT: usize = 5_000;
+        let byte = Grammar::<Align, 2>::new(&["S"], 0, vec![]).unwrap();
+        let typed = TokenGrammar::<Align, 2, ()>::new(&["S"], 0, vec![]).unwrap();
+        let (a, b) = (vec![0; LONG], vec![0; SHORT]);
+        let (x, y) = (vec![(); LONG], vec![(); SHORT]);
+        let unexpected_reservation = |_| panic!("overflow must precede offset reservation");
+        for inputs in [[&a[..], &b[..]], [&b, &a]] {
+            assert_eq!(
+                byte.bind_with_offsets(inputs, unexpected_reservation).err(),
+                Some(Error::Overflow)
+            );
+            assert_eq!(byte.bind(inputs).err(), Some(Error::Overflow));
+        }
+        for inputs in [[&x[..], &y[..]], [&y, &x]] {
+            assert_eq!(
+                typed.bind_with_offsets(inputs, unexpected_reservation).err(),
+                Some(Error::Overflow)
+            );
+            assert_eq!(typed.bind(inputs).err(), Some(Error::Overflow));
+        }
+    }
+
+    #[test]
+    fn representable_layout_returns_reservation_failure() {
+        let byte = Grammar::<Align, 2>::new(&["S"], 0, vec![]).unwrap();
+        let typed = TokenGrammar::<Align, 2, ()>::new(&["S"], 0, vec![]).unwrap();
+        let failure = |length| {
+            // An empty track has one span and requests one offset.
+            assert_eq!(length, 1);
+            Err(Error::AllocationFailed)
+        };
+        assert_eq!(
+            byte.bind_with_offsets([&[], &[]], failure).err(),
+            Some(Error::AllocationFailed)
+        );
+        assert_eq!(
+            typed.bind_with_offsets([&[], &[]], failure).err(),
+            Some(Error::AllocationFailed)
+        );
     }
 }
