@@ -120,3 +120,28 @@ that its evaluated additions fit.
 
 For the product laws and strictness conditions, see Steffen and Giegerich,
 [Versatile and declarative dynamic programming using pair algebras](https://doi.org/10.1186/1471-2105-6-224).
+
+## Cover points with labelled intervals
+
+Use `fast::interval_cover::solve` to find the least total price of a set
+of rows covering every point and count all sets attaining that price.
+Each index identifies a choice, so two suppliers offering the same
+interval at the same price can give two optimal covers.
+
+```rust
+use zeno_adp::fast::interval_cover::{solve, Interval, Pin};
+
+fn main() -> Result<(), zeno_adp::fast::interval_cover::CoverError> {
+    let rows = [Interval { start: 0, end: 2, cost: 3 }; 2];
+    let best = solve(2, &rows, &[])?.unwrap();
+    assert_eq!((best.cost, best.count), (3, 2u8.into()));
+
+    let pinned = solve(2, &rows, &[Pin::Include, Pin::Either])?.unwrap();
+    assert_eq!((pinned.cost, pinned.count), (3, 1u8.into()));
+    Ok(())
+}
+```
+
+For the optimum under each single-row intervention, use
+`fast::interval_choice::analyze`. Its `unanimous_rows()` iterator gives
+the decisions shared by every optimum. [Interval-cover guide](INTERVAL-COVER.md)

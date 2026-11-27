@@ -1,0 +1,11 @@
+shape,points,rows,repetitions,chart_median_ms,fast_median_ms,ratio,min_cost,count_bits
+independent-free,16,48,9,0.117757,0.037496,3.14,0,45
+independent-free,64,192,9,1.828165,0.127031,14.39,0,180
+independent-free,128,384,9,7.475773,0.313541,23.84,0,360
+independent-free,256,768,9,42.975902,0.744358,57.74,0,719
+independent-free,512,1536,5,171.072139,1.760203,97.19,0,1438
+overlap-mixed,16,48,9,0.139109,0.036175,3.85,0,2
+overlap-mixed,64,192,9,2.470449,0.079128,31.22,0,21
+overlap-mixed,128,384,9,9.786984,0.178228,54.91,0,42
+overlap-mixed,256,768,9,54.787758,0.419070,130.74,0,85
+overlap-mixed,512,1536,5,254.204928,1.580393,160.85,0,170

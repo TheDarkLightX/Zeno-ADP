@@ -1,0 +1,9 @@
+task,shape,points,rows,repetitions,baseline_ms,new_ms,ratio
+rolled,independent-free,512,1536,9,0.111077,1.706572,0.07
+rolled,independent-free,2048,6144,9,0.563236,9.890791,0.06
+rolled,independent-free,8192,24576,9,4.649962,77.132373,0.06
+all-single-pins,independent-free,128,384,7,222.515043,0.515774,431.42
+rolled,overlap-mixed,512,1536,9,0.417557,1.030216,0.41
+rolled,overlap-mixed,2048,6144,9,5.176863,5.727630,0.90
+rolled,overlap-mixed,8192,24576,9,103.721025,32.761230,3.17
+all-single-pins,overlap-mixed,128,384,7,127.508873,0.683466,186.56

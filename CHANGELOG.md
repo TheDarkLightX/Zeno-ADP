@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9 (unreleased)
+
+- Find the minimum cost and exact number of labelled interval covers, including
+  under required and excluded rows. The sparse frontier promotes to a range
+  tree at a measured width, with an explicit caller override.
+- Compute the optimum for every single include and exclude intervention in one
+  reverse pass and report unanimous decisions. [Interval-cover guide](docs/INTERVAL-COVER.md)
+
 ## 0.8.0
 
 - Find derivations that are optimal in several additive cost models at once.
