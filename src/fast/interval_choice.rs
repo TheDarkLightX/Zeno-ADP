@@ -24,6 +24,16 @@ fn add(a: &Score, b: &Score) -> Score {
     }
 }
 
+fn accumulate(sum: &mut Score, term: Score) {
+    if let Some(value) = term {
+        match sum {
+            Some(best) if best.cost < value.cost => {}
+            Some(best) if best.cost == value.cost => best.count += value.count,
+            _ => *sum = Some(value),
+        }
+    }
+}
+
 fn mul(a: &Score, b: &Score) -> Score {
     let (a, b) = (a.as_ref()?, b.as_ref()?);
     Some(Optimum {
@@ -100,18 +110,21 @@ impl Tape {
         }
         d[root] = self.values[ONE].clone();
         for i in (2..=root).rev() {
-            if d[i].is_none() {
+            // Only leaf contexts are returned to the caller. Once an internal
+            // gate is visited, move its contribution to its operands.
+            if matches!(self.gates[i], Gate::Leaf) || d[i].is_none() {
                 continue;
             }
+            let context = d[i].take();
             match self.gates[i] {
-                Gate::Leaf => {}
+                Gate::Leaf => unreachable!(),
                 Gate::Add(a, b) => {
-                    d[a] = add(&d[a], &d[i]);
-                    d[b] = add(&d[b], &d[i]);
+                    accumulate(&mut d[a], context.clone());
+                    accumulate(&mut d[b], context);
                 }
                 Gate::Mul(a, b) => {
-                    d[a] = add(&d[a], &mul(&d[i], &self.values[b]));
-                    d[b] = add(&d[b], &mul(&d[i], &self.values[a]));
+                    accumulate(&mut d[a], mul(&context, &self.values[b]));
+                    accumulate(&mut d[b], mul(&context, &self.values[a]));
                 }
             }
         }
@@ -140,6 +153,14 @@ impl Range {
     }
 }
 
+#[derive(Clone, Copy)]
+struct RowGates {
+    end: usize,
+    skip: Id,
+    take: Id,
+    stay: Id,
+}
+
 struct Chart {
     a: Vec<Id>,
     lazy: Vec<Id>,
@@ -149,7 +170,9 @@ impl Chart {
     fn apply(&mut self, k: usize, g: Id) {
         if self.a[k] != EMPTY {
             self.a[k] = self.tape.both(self.a[k], g);
-            self.lazy[k] = self.tape.both(self.lazy[k], g);
+            if k < self.a.len() / 2 {
+                self.lazy[k] = self.tape.both(self.lazy[k], g);
+            }
         }
     }
     fn push(&mut self, k: usize) {
@@ -163,49 +186,40 @@ impl Chart {
     fn pull(&mut self, k: usize) {
         self.a[k] = self.tape.either(self.a[2 * k], self.a[2 * k + 1]);
     }
-    fn scale(&mut self, k: usize, r: Range, s: Range, g: Id) {
-        if self.a[k] == EMPTY || r.end <= s.start || s.end <= r.start {
-            return;
-        }
-        if s.start <= r.start && r.end <= s.end {
-            self.apply(k, g);
+    // Follow the path to the row end once. Whole siblings to its left
+    // contribute their *old* states to the take branch, then keep only skips.
+    // Siblings to its right keep their edge under either permitted choice.
+    fn row(&mut self, k: usize, r: Range, row: RowGates, mut prior: Id) {
+        if r.end - r.start == 1 {
+            let advance = self.tape.both(prior, row.take);
+            let stay = self.tape.both(self.a[k], row.stay);
+            self.a[k] = self.tape.either(stay, advance);
             return;
         }
         self.push(k);
-        let (l, r) = r.split();
-        self.scale(2 * k, l, s, g);
-        self.scale(2 * k + 1, r, s, g);
+        let (left, right) = r.split();
+        if row.end < left.end {
+            self.apply(2 * k + 1, row.stay);
+            self.row(2 * k, left, row, prior);
+        } else {
+            prior = self.tape.either(prior, self.a[2 * k]);
+            self.apply(2 * k, row.skip);
+            self.row(2 * k + 1, right, row, prior);
+        }
         self.pull(k);
     }
-    fn prefix(&mut self, k: usize, r: Range, end: usize) -> Id {
-        if end <= r.start || self.a[k] == EMPTY {
-            return EMPTY;
-        }
-        if r.end <= end {
-            return self.a[k];
-        }
-        self.push(k);
-        let (l, r) = r.split();
-        let a = self.prefix(2 * k, l, end);
-        let b = self.prefix(2 * k + 1, r, end);
-        self.tape.either(a, b)
-    }
-    fn point(&mut self, k: usize, r: Range, i: usize, v: Id, combine: bool) {
+    fn set(&mut self, k: usize, r: Range, i: usize, v: Id) {
         if r.end - r.start == 1 {
-            self.a[k] = if combine {
-                self.tape.either(self.a[k], v)
-            } else {
-                v
-            };
+            self.a[k] = v;
             self.lazy[k] = ONE;
             return;
         }
         self.push(k);
         let (l, r) = r.split();
         if i < l.end {
-            self.point(2 * k, l, i, v, combine);
+            self.set(2 * k, l, i, v);
         } else {
-            self.point(2 * k + 1, r, i, v, combine);
+            self.set(2 * k + 1, r, i, v);
         }
         self.pull(k);
     }
@@ -291,7 +305,7 @@ pub fn analyze(
         start: 0,
         end: width,
     };
-    chart.point(1, whole, 0, ONE, false);
+    chart.set(1, whole, 0, ONE);
     let mut labels = crate::reserve_table(rows.len())?;
     for (i, &Interval { start, end, cost }) in rows.iter().enumerate() {
         let pin = pins.get(i).copied().unwrap_or(Pin::Either);
@@ -310,22 +324,20 @@ pub fn analyze(
     }
     for (i, group) in events.into_iter().enumerate() {
         for (end, skip, take) in group {
-            let a = chart.prefix(1, whole, end);
-            let advance = chart.tape.both(a, take);
-            chart.scale(1, whole, Range { start: 0, end }, skip);
             let stay = chart.tape.either(skip, take);
-            chart.scale(
+            chart.row(
                 1,
                 whole,
-                Range {
-                    start: end,
-                    end: width,
+                RowGates {
+                    end,
+                    skip,
+                    take,
+                    stay,
                 },
-                stay,
+                EMPTY,
             );
-            chart.point(1, whole, end, advance, true);
         }
-        chart.point(1, whole, i, EMPTY, false);
+        chart.set(1, whole, i, EMPTY);
     }
     let root = chart.a[1];
     let Some(optimum) = chart.tape.values[root].clone() else {
@@ -356,6 +368,21 @@ pub fn analyze(
 mod tests {
     use super::*;
     use crate::fast::interval_cover::{solve, solve_chart};
+    #[test]
+    fn outside_counts_each_operand_of_a_shared_gate() {
+        let mut tape = Tape::new();
+        let leaf = tape.tag(3);
+        let sum = tape.either(leaf, leaf);
+        let root = tape.both(sum, sum);
+        let outside = tape.outside(root);
+        assert_eq!(
+            outside[leaf],
+            Some(Optimum {
+                cost: 3,
+                count: 8u8.into()
+            })
+        );
+    }
     #[test]
     fn no_tie_break_publication_or_numeric_pruning() {
         let rows = [

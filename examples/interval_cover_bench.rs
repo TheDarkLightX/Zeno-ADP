@@ -2,7 +2,7 @@ use std::hint::black_box;
 use std::time::{Duration, Instant};
 
 use zeno_adp::fast::interval_cover::{
-    solve_chart, solve_range as solve, CoverError, Interval, Optimum, Pin,
+    solve, solve_chart, solve_range, CoverError, Interval, Optimum, Pin,
 };
 
 fn sample(shape: &str, n: usize) -> Vec<Interval> {
@@ -49,9 +49,14 @@ fn timed(f: Solve, n: usize, rows: &[Interval]) -> Duration {
 }
 
 fn main() {
+    let (fast, name): (Solve, _) = match std::env::args().nth(1).as_deref() {
+        None => (solve_range, "range"),
+        Some("--default") => (solve, "default"),
+        _ => panic!("expected --default or no argument"),
+    };
     let raw = std::env::var_os("RAW_SAMPLES").is_some();
     if raw {
-        eprintln!("shape,points,rep,first,chart_ns,fast_ns");
+        eprintln!("shape,points,rep,first,chart_ns,{name}_ns");
     }
     println!(
         "shape,points,rows,repetitions,chart_median_ms,fast_median_ms,ratio,min_cost,count_bits"
@@ -59,7 +64,7 @@ fn main() {
     for shape in ["independent-free", "overlap-mixed"] {
         for n in [16, 64, 128, 256, 512] {
             let rows = sample(shape, n);
-            let score = solve(n, &rows, &[]).unwrap().unwrap();
+            let score = fast(n, &rows, &[]).unwrap().unwrap();
             assert_eq!(Some(score.clone()), solve_chart(n, &rows, &[]).unwrap());
             let reps = if n <= 256 { 9 } else { 5 };
             let mut f = vec![];
@@ -67,11 +72,11 @@ fn main() {
             for i in 0..reps {
                 let (a, b);
                 if i % 2 == 0 {
-                    a = timed(solve, n, &rows);
+                    a = timed(fast, n, &rows);
                     b = timed(solve_chart, n, &rows);
                 } else {
                     b = timed(solve_chart, n, &rows);
-                    a = timed(solve, n, &rows);
+                    a = timed(fast, n, &rows);
                 }
                 if raw {
                     let first = if i % 2 == 0 { "fast" } else { "chart" };

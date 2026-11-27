@@ -3,11 +3,10 @@
 //! Each row has its own identity (its index), even if another row has an
 //! identical footprint and price. A zero-price redundant row may therefore
 //! contribute an additional optimum. This is not a count of cover paths.
-//! The fast solver uses O((points + rows) log(points + 1)) arithmetic
+//! The default and range solvers use O((points + rows) log(points + 2)) arithmetic
 //! operations and O(points + rows) entries, excluding the bit cost of counts.
 
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
 use std::fmt;
 
 use num_bigint::BigUint;
@@ -39,6 +38,9 @@ pub struct Optimum {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CoverError {
+    InvalidSparseLimit {
+        limit: usize,
+    },
     PinCount {
         expected: usize,
         actual: usize,
@@ -61,6 +63,9 @@ impl From<Error> for CoverError {
 impl fmt::Display for CoverError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidSparseLimit { limit } => {
+                write!(f, "sparse limit must be positive, got {limit}")
+            }
             Self::PinCount { expected, actual } => {
                 write!(
                     f,
@@ -299,15 +304,26 @@ fn menu(points: usize, rows: &[Interval], pins: &[Pin]) -> Result<Menu, CoverErr
     })
 }
 
-const SPARSE_LIMIT: usize = 256;
+// Sparse rows scan or shift up to one frontier. The tree touches O(height)
+// nodes for each prefix, update and insertion. Calibrate their relative cost
+// using the peak live edges / tree height where forced-mode times cross.
+// On 2026-11-27, Ryzen Threadripper 1950X, CPU 22, Rust 1.97.1:
+// taskset -c 22 cargo run --release --offline --locked --example interval_cover_cross_bench -- --grid
+// Log interpolation between adjacent mixed sizes gave 31.0, 44.0 and 42.6
+// edges/level for 1, 3 and 6 rows/point. Round the median to 43.
+// Narrow independent menus peaked at two live edges at every size.
+fn default_sparse_limit(points: usize) -> usize {
+    let height = (usize::BITS - points.leading_zeros()) as usize; // ceil(log2(points + 1))
+    43 * height.max(1)
+}
 
 enum Sweep {
-    Sparse(BTreeMap<usize, Optimum>),
+    Sparse(Vec<(usize, Optimum)>),
     Range(Tree),
 }
 
 impl Sweep {
-    fn range(width: usize, states: BTreeMap<usize, Optimum>) -> Result<Self, Error> {
+    fn range(width: usize, states: Vec<(usize, Optimum)>) -> Result<Self, Error> {
         let mut t = Tree::new(width)?;
         for (edge, v) in states {
             t.insert(1, 0, t.leaves, edge, v)?;
@@ -315,20 +331,29 @@ impl Sweep {
         Ok(Self::Range(t))
     }
 
-    fn take_row(&mut self, width: usize, row: Interval, pin: Pin) -> Result<(), Error> {
+    fn take_row(
+        &mut self,
+        width: usize,
+        sparse_limit: usize,
+        row: Interval,
+        pin: Pin,
+    ) -> Result<(), Error> {
         // Required-row prices are accounted for once in the caller's fixed cost.
         let end = row.end;
         let required = pin == Pin::Include;
         let mut prior = None;
         match self {
             Self::Sparse(active) => {
-                for (_, score) in active.range(..end) {
+                let split = active.partition_point(|(edge, _)| *edge < end);
+                for (_, score) in &active[..split] {
                     merge(&mut prior, score);
                 }
+                let mut insert_at = split;
                 if required {
-                    *active = active.split_off(&end);
+                    active.drain(..split);
+                    insert_at = 0;
                 } else if row.cost == 0 {
-                    for (_, score) in active.range_mut(end..) {
+                    for (_, score) in &mut active[split..] {
                         score.count <<= 1usize;
                     }
                 }
@@ -336,21 +361,19 @@ impl Sweep {
                     if !required {
                         score.pay(row.cost)?;
                     }
-                    match active.entry(end) {
-                        std::collections::btree_map::Entry::Vacant(e) => {
-                            e.insert(score);
+                    if let Some((_, prev)) =
+                        active.get_mut(insert_at).filter(|(edge, _)| *edge == end)
+                    {
+                        match score.cost.cmp(&prev.cost) {
+                            Ordering::Less => *prev = score,
+                            Ordering::Equal => prev.count += score.count,
+                            Ordering::Greater => {}
                         }
-                        std::collections::btree_map::Entry::Occupied(mut e) => {
-                            let prev = e.get_mut();
-                            match score.cost.cmp(&prev.cost) {
-                                Ordering::Less => *prev = score,
-                                Ordering::Equal => prev.count += score.count,
-                                Ordering::Greater => {}
-                            }
-                        }
+                    } else {
+                        active.insert(insert_at, (end, score));
                     }
                 }
-                if active.len() > SPARSE_LIMIT {
+                if active.len() > sparse_limit {
                     *self = Self::range(width, std::mem::take(active))?;
                 }
             }
@@ -376,7 +399,9 @@ impl Sweep {
     fn retire(&mut self, point: usize) -> Result<(), Error> {
         match self {
             Self::Sparse(active) => {
-                active.remove(&point);
+                if active.first().is_some_and(|(edge, _)| *edge == point) {
+                    active.remove(0);
+                }
             }
             Self::Range(tree) => tree.update(1, 0, tree.leaves, (0, point + 1), Pending::Clear)?,
         }
@@ -385,7 +410,10 @@ impl Sweep {
 
     fn answer(self, points: usize) -> Score {
         match self {
-            Self::Sparse(mut states) => states.remove(&points),
+            Self::Sparse(mut states) => states
+                .pop()
+                .filter(|(edge, _)| *edge == points)
+                .map(|(_, score)| score),
             Self::Range(mut tree) => tree.cells[1].answer.take(),
         }
     }
@@ -395,11 +423,11 @@ fn run(
     points: usize,
     rows: &[Interval],
     pins: &[Pin],
-    start_dense: bool,
+    sparse_limit: usize,
 ) -> Result<Score, CoverError> {
     let menu = menu(points, rows, pins)?;
-    let initial = BTreeMap::from([(0, Optimum::seed())]);
-    let mut sweep = if start_dense {
+    let initial = vec![(0, Optimum::seed())];
+    let mut sweep = if sparse_limit == 0 {
         Sweep::range(menu.width, initial)?
     } else {
         Sweep::Sparse(initial)
@@ -412,7 +440,7 @@ fn run(
                     .checked_add(row.cost.into())
                     .ok_or(Error::Overflow)?;
             }
-            sweep.take_row(menu.width, row, pin)?;
+            sweep.take_row(menu.width, sparse_limit, row, pin)?;
         }
         sweep.retire(point)?;
     }
@@ -427,13 +455,28 @@ fn run(
 /// Begin with sparse states and promote once the frontier widens.
 /// For zero points the empty menu has one optimum at cost zero.
 pub fn solve(points: usize, rows: &[Interval], pins: &[Pin]) -> Result<Score, CoverError> {
-    run(points, rows, pins, false)
+    run(points, rows, pins, default_sparse_limit(points))
+}
+
+/// Start sparse and promote after a row leaves more than `limit` live boundaries.
+/// A limit of zero is invalid. Use [`solve_range`] to start in range mode,
+/// or `usize::MAX` to keep all reachable boundaries sparse.
+pub fn solve_with_sparse_limit(
+    points: usize,
+    rows: &[Interval],
+    pins: &[Pin],
+    limit: usize,
+) -> Result<Score, CoverError> {
+    if limit == 0 {
+        return Err(CoverError::InvalidSparseLimit { limit });
+    }
+    run(points, rows, pins, limit)
 }
 
 /// Range-table implementation, for comparison or for callers that know
 /// the frontier will be wide early.
 pub fn solve_range(points: usize, rows: &[Interval], pins: &[Pin]) -> Result<Score, CoverError> {
-    run(points, rows, pins, true)
+    run(points, rows, pins, 0)
 }
 
 #[derive(Clone, Copy)]
@@ -514,4 +557,19 @@ fn reference(points: usize, rows: &[Interval], pins: &[Pin]) -> Result<Reference
 pub fn solve_chart(points: usize, rows: &[Interval], pins: &[Pin]) -> Result<Score, CoverError> {
     let chart = reference(points, rows, pins)?;
     Ok(tabulate(&chart.chart, &MinCount)?.pop())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn automatic_limit_spans_the_measured_crossover() {
+        // The 1,024-point mixed menu peaks at 258 edges and favours sparse
+        // at each measured density. Range wins at 1,026 edges / 4,096 points.
+        assert!(default_sparse_limit(1024) >= 258);
+        assert!(default_sparse_limit(4096) < 1026);
+        assert!(default_sparse_limit(0) > 0);
+        assert!(default_sparse_limit(usize::MAX) > default_sparse_limit(4096));
+    }
 }

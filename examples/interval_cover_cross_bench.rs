@@ -2,7 +2,7 @@ use num_bigint::BigUint;
 use std::{collections::BTreeMap, hint::black_box, time::Instant};
 use zeno_adp::fast::{
     interval_choice::analyze,
-    interval_cover::{solve, solve_range, Interval, Optimum, Pin},
+    interval_cover::{solve, solve_range, solve_with_sparse_limit, Interval, Optimum, Pin},
 };
 
 fn fixture(n: usize, mixed: bool) -> Vec<Interval> {
@@ -112,7 +112,74 @@ fn paired<R, S>(mut f: impl FnMut() -> R, mut g: impl FnMut() -> S, reps: usize)
     (a[reps / 2], b[reps / 2])
 }
 
+fn grid_fixture(n: usize, mixed: bool, density: usize) -> Vec<Interval> {
+    let rows = fixture(n, mixed);
+    let mut out = Vec::with_capacity(n * density);
+    for triple in rows.chunks_exact(3) {
+        match density {
+            1 => out.push(triple[2]),
+            3 => out.extend_from_slice(triple),
+            6 => {
+                out.extend_from_slice(triple);
+                out.extend_from_slice(triple);
+            }
+            _ => unreachable!("grid specifies one, three or six rows per point"),
+        }
+    }
+    out
+}
+
+fn grid() {
+    println!("shape,points,density,rows,peak_live,reps,rolled_ms,sparse_ms,range_ms,default_ms,rolled_over_default,sparse_over_range");
+    for (mixed, name) in [(false, "independent-free"), (true, "overlap-mixed")] {
+        for n in [128, 512, 1024, 2048, 4096, 8192] {
+            for density in [1, 3, 6] {
+                let rows = grid_fixture(n, mixed, density);
+                // For these unrestricted menus any reachable smaller edge can advance.
+                let mut live = std::collections::BTreeSet::from([0]);
+                let mut peak = 1;
+                for (start, group) in rows.chunks_exact(density).enumerate() {
+                    for row in group {
+                        if live.first().is_some_and(|&edge| edge < row.end) {
+                            live.insert(row.end);
+                            peak = peak.max(live.len());
+                        }
+                    }
+                    live.remove(&start);
+                }
+                let run = |mode| match mode {
+                    0 => rolled(n, &rows),
+                    1 => solve_with_sparse_limit(n, &rows, &[], usize::MAX).unwrap(),
+                    2 => solve_range(n, &rows, &[]).unwrap(),
+                    3 => solve(n, &rows, &[]).unwrap(),
+                    _ => unreachable!(),
+                };
+                let expected = run(0);
+                for mode in 1..4 {
+                    assert_eq!(run(mode), expected);
+                }
+                let mut samples = [[0.0; 9]; 4];
+                for rep in 0..9 {
+                    for slot in 0..4 {
+                        let mode = (slot + rep) % 4;
+                        samples[mode][rep] = elapsed(|| run(mode));
+                    }
+                }
+                let [rolled, sparse, range, default] = samples.map(|mut times| {
+                    times.sort_by(f64::total_cmp);
+                    times[4]
+                });
+                println!("{name},{n},{density},{},{peak},9,{rolled:.6},{sparse:.6},{range:.6},{default:.6},{:.4},{:.4}",
+                    rows.len(), rolled / default, sparse / range);
+            }
+        }
+    }
+}
+
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--grid") {
+        return grid();
+    }
     println!("task,shape,points,rows,repetitions,baseline_ms,new_ms,ratio");
     for (mixed, name) in [(false, "independent-free"), (true, "overlap-mixed")] {
         for n in [512, 2048, 8192] {
@@ -138,7 +205,10 @@ fn main() {
             out
         };
         let tape = || analyze(n, &r, &[]).unwrap().unwrap();
-        assert!(tape()
+        let checked = tape();
+        assert_eq!(checked.rows.len(), r.len());
+        assert_eq!(Some(checked.optimum), solve(n, &r, &[]).unwrap());
+        assert!(checked
             .rows
             .iter()
             .zip(independent())
@@ -149,5 +219,27 @@ fn main() {
             r.len(),
             a / b
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crossover_grid_includes_both_packet_menus() {
+        for mixed in [false, true] {
+            let n = 16;
+            let packet = fixture(n, mixed);
+            assert_eq!(grid_fixture(n, mixed, 3), packet);
+            let single = grid_fixture(n, mixed, 1);
+            let double = grid_fixture(n, mixed, 6);
+            for i in 0..n {
+                let triple = &packet[3 * i..3 * i + 3];
+                assert_eq!(single[i], triple[2]);
+                assert_eq!(&double[6 * i..6 * i + 3], triple);
+                assert_eq!(&double[6 * i + 3..6 * i + 6], triple);
+            }
+        }
     }
 }

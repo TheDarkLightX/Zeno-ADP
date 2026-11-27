@@ -1,6 +1,6 @@
 use num_bigint::BigUint;
 use zeno_adp::fast::interval_cover::{
-    solve, solve_chart, solve_range, CoverError, Interval, Optimum, Pin,
+    solve, solve_chart, solve_range, solve_with_sparse_limit, CoverError, Interval, Optimum, Pin,
 };
 
 fn brute(n: usize, rows: &[Interval], pins: &[Pin]) -> Option<Optimum> {
@@ -73,6 +73,16 @@ fn random_pinned_and_unpinned_three_way() {
         };
         let b = brute(n, &rows, &pins);
         assert_eq!(solve(n, &rows, &pins).unwrap(), b, "fast menu {i}");
+        assert_eq!(
+            solve_with_sparse_limit(n, &rows, &pins, 1).unwrap(),
+            b,
+            "early promotion menu {i}"
+        );
+        assert_eq!(
+            solve_with_sparse_limit(n, &rows, &pins, usize::MAX).unwrap(),
+            b,
+            "sparse menu {i}"
+        );
         assert_eq!(solve_chart(n, &rows, &pins).unwrap(), b, "chart menu {i}");
         assert_eq!(solve_range(n, &rows, &pins).unwrap(), b, "range menu {i}");
     }
@@ -163,4 +173,66 @@ fn hybrid_promotes_with_nontrivial_counts_and_pins() {
     assert!(expected.is_some());
     assert_eq!(solve(points, &rows, &pins).unwrap(), expected);
     assert_eq!(solve_range(points, &rows, &pins).unwrap(), expected);
+}
+
+#[test]
+fn caller_limit_refuses_zero_and_preserves_pinned_results() {
+    assert_eq!(
+        solve_with_sparse_limit(0, &[], &[], 0),
+        Err(CoverError::InvalidSparseLimit { limit: 0 })
+    );
+    // Multiple equal ends, distinct prices, an excluded row and an unsorted start.
+    let r = |start, end, cost| Interval { start, end, cost };
+    let rows = [r(0, 1, 0), r(2, 3, 3), r(0, 2, 1), r(0, 3, 4), r(0, 2, 1)];
+    let pins = [
+        Pin::Either,
+        Pin::Include,
+        Pin::Either,
+        Pin::Exclude,
+        Pin::Either,
+    ];
+    let expected = brute(3, &rows, &pins);
+    assert_eq!(
+        expected,
+        Some(Optimum {
+            cost: 4,
+            count: 4u8.into()
+        })
+    );
+    for limit in [1, 2, 3, usize::MAX] {
+        assert_eq!(
+            solve_with_sparse_limit(3, &rows, &pins, limit).unwrap(),
+            expected
+        );
+    }
+}
+
+#[test]
+fn every_single_pin_at_large_tie_counts() {
+    use zeno_adp::fast::interval_choice::{analyze, Agreement};
+    let points = 128;
+    let rows: Vec<_> = (0..points)
+        .flat_map(|start| {
+            [Interval {
+                start,
+                end: start + 1,
+                cost: 0,
+            }; 3]
+        })
+        .collect();
+    let choices = analyze(points, &rows, &[]).unwrap().unwrap();
+    let others = BigUint::from(7u8).pow((points - 1) as u32);
+    let expected = |n: u8| {
+        Some(Optimum {
+            cost: 0,
+            count: n * &others,
+        })
+    };
+    assert_eq!(Some(choices.optimum), expected(7));
+    assert_eq!(choices.rows.len(), rows.len());
+    for row in choices.rows {
+        assert_eq!(row.agreement, Agreement::Varies);
+        assert_eq!(row.exclude, expected(3));
+        assert_eq!(row.include, expected(4));
+    }
 }
