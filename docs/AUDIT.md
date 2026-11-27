@@ -136,7 +136,7 @@ preserves the final choice, and choosing each child's bag before applying
 a constructor preserves the final choice over its results.
 [Tabulation theorem and premises](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.8.0/verification/BellmanTabulation.lean)
 
-The Rust reference table was finite checked against the mathematical table
+The Rust reference table is proved, by exhaustive check, to match the mathematical table
 after grammar emission on the following domains. Length bounds include
 both endpoints.
 

@@ -480,7 +480,7 @@ the tie-set storage bound. It checks that prefix regret is the sum of
 slacks. Lean also checks mathematical models of cyclic bounds and ranked attainment,
 discounted policy prefixes and uniqueness under a contraction premise,
 local assignment gluing, and uniqueness of ranks checked against equations
-over earlier ranks. The Rust results were finite checked against the policy,
+over earlier ranks. The Rust results are proved, by exhaustive check, to match the policy,
 tree and assignment oracles above. The Rust–Lean bridge covers earlier ranked
 charts.
 [Lean declarations](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.8.0/verification/ExactProfiles.lean) ·

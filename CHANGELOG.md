@@ -24,7 +24,7 @@
   gives an upper bound for each pass.
 - Find the coarsest history state of a reachable raw model with
   `state_discovery` and build an explicit chart. Generic geometries count
-  move derivations. A finite check validates scores through its length.
+  move derivations. An exhaustive check proves the scores through its length.
   A chart's scorer label is Exact when the check belongs to the same raw
   model and covers every candidate word length in the instance.
 - Use `verify_for` to bind replay to the requested selection or regret

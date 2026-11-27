@@ -68,7 +68,7 @@ For a transferred certificate, replay it with `verify` on the intended
 Use `Common::verify_for` and `WithinBudget::verify_for` to bind a replay
 to the requested selection or budget, and `ZeroRegret::verify` for a
 zero-regret certificate. Replay a quotient with `Quotient::verify` against
-the raw model. Read `Solved::scorer_label` for the assurance a finite check
+the raw model. Read `Solved::scorer_label` for the assurance an exhaustive check
 gives the chart's answer against the scorer.
 
 [Exact query guide](docs/EXACT.md) · [Ladder example](examples/separator_ladder.rs)
@@ -173,7 +173,7 @@ parent without changing the chosen answers. This equality is proved for
 the mathematical chart. In Rust, agreement also requires successful
 operations on discarded branches and on every cell evaluated.
 
-Rust's reference table was finite checked against that specification on
+Rust's reference table is proved, by exhaustive check, to match that specification on
 1,892 charts covering short folding, alignment, matrix-chain and knapsack
 inputs and a four-cell fixture. The audit guide gives the exact domains
 and five answers compared at each rank. [Audit guide](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.8.0/docs/AUDIT.md#verification-scope)
