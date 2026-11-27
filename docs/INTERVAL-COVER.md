@@ -1,5 +1,9 @@
 # Minimum-cost interval cover
 
+Take two labelled rows, each covering `[0, 2)` for price 3. The optimum
+cost is 3, with two optimal sets, one per row. Pin the first row to
+`Include` and only its singleton set attains that price.
+
 Each row covers a nonempty half-open interval `[start, end)` within
 `0..points` at a nonnegative `u64` price. Its index identifies it.
 Equal rows at different indices are distinct choices. Adding a redundant
@@ -51,12 +55,13 @@ a new pinned context. An infeasible context returns `Ok(None)`.
 
 ## Evidence and replay
 
-Lean checks the sweep geometry, indexed subset correspondence, local
-cost/count laws and the full-count criterion for unanimity. These proofs
-end at the mathematical model. Differential tests check the Rust sweep
-and reverse computation against exhaustive enumeration and independently
-pinned generic charts. The large count control checks the exact integer
-7^50,000. [Proofs and Python checkers](../verification/interval_cover)
+Lean proves sweep geometry, indexed subset correspondence, local
+cost/count laws and the full-count criterion for unanimity over the
+mathematical models in the proof sources. Rust differential tests compare
+the sweep and reverse computation with exhaustive enumeration and
+independently pinned generic charts over the fixtures in
+`tests/interval_cover.rs` and the unit tests in `src/fast/interval_choice.rs`.
+The large count control checks the exact integer 7^50,000. [Proofs and Python checkers](../verification/interval_cover)
 
 The two real menus represent source excerpts for reviewing error paths in
 CPython 3.12.3's `tarfile.py` and `zipfile/__init__.py` (Ubuntu build

@@ -1,5 +1,30 @@
 # Choose a question
 
+## Three questions, one chart
+
+For the [three matrices in the README](../README.md#parenthesize-three-matrices),
+each interval can split between adjacent matrices, and each singleton has
+one leaf. At the root, splitting after A produces `A(BC)` and splitting
+after B produces `(AB)C`.
+
+| Cell | `Minimum` (scalar multiplications) | `Count` | `Enumerate` |
+|---|---:|---:|---|
+| A | 0 | 1 | `A` |
+| B | 0 | 1 | `B` |
+| C | 0 | 1 | `C` |
+| AB | 1,500 | 1 | `(AB)` |
+| BC | 9,000 | 1 | `(BC)` |
+| ABC | 4,500 | 2 | `A(BC)`, `(AB)C` |
+
+The minimum algebra adds the local split cost to its two child costs and
+takes the least candidate. The count algebra multiplies the child counts
+and sums over splits. The enumeration algebra constructs the parent tree
+and keeps every occurrence. Use `tabulate_cells` to read all six cells or
+`tabulate` to read only the root. The same early-choice condition applies
+to each question. [Bellman's principle](AUDIT.md#checking-bellmans-principle)
+
+## Query contracts
+
 The reference audit runs on a ranked chart. For a compiled program, first
 collect its rules with `compiled::reference_chart`. In the table, **audit
 the algebra** means run the bounded reference check and inspect

@@ -12,7 +12,7 @@ keywords = ["dynamic-programming", "grammars", "optimization", "algebra"]
 categories = ["algorithms", "science"]
 include = [
     "/src/**", "/docs/**", "!/docs/DESIGN.md", "!/docs/LITERATURE.md",
-    "/examples/**", "/tests/**",
+    "/examples/**", "/tests/**", "/verification/**",
     "/Cargo.toml", "/Cargo.lock", "/README.md", "/CHANGELOG.md", "/LICENSE",
 ]
 

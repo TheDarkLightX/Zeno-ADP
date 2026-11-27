@@ -73,7 +73,16 @@ The [folding](../examples/fold_classes.rs) and
 
 ## Checking Bellman's principle
 
+In the [three-matrix chart](QUESTIONS.md#three-questions-one-chart), every
+particular split adds a fixed cost to its children. Substituting a cheaper
+child therefore gives a parent at least as cheap. An order-reversing
+constructor would need a different algebra. If the child scores are 1
+and 5, choosing the minimum before applying `x ↦ 10 − x` gives 9, while
+applying it to both before choosing gives 5.
+
 Call `audit_bounded` on each input in the finite domain you want to check.
+The three-matrix example has 19 nodes across all expanded derivations in
+all six cells. That number is also the expansion budget below.
 
 ```rust
 use zeno_adp::algebras::Additive;
@@ -85,7 +94,7 @@ fn main() -> Result<(), zeno_adp::Error> {
     let report = audit_bounded(
         &chart,
         &Additive::default(),
-        AuditBudget { max_tree_nodes: 100 },
+        AuditBudget { max_tree_nodes: 19 },
         AnswerOrder::Ordered,
     )?;
     assert_eq!(report.tree_nodes, 19);

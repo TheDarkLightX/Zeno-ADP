@@ -1,13 +1,46 @@
 # Zeno-ADP
 
-Zeno-ADP is a Rust library for algebraic dynamic programming (ADP). A grammar
-builds candidate trees. Algebras ask questions about those trees, including
-the minimum or maximum score, counts, Pareto fronts and distributions over
-derivations. The query guide lists what each algebra counts and how to
-check its answers. [Query guide](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.8.0/docs/QUESTIONS.md)
+## Parenthesize three matrices
 
-Here, ≈DP (read “approximate DP”) means approximate dynamic programming,
-and adaptive dynamic programming is written in full.
+Suppose A is 10×30, B is 30×5, and C is 5×60. We want to parenthesize
+`ABC` without changing the matrix order. The chart has one cell per
+nonempty interval. Its root can put the last split after A or after B.
+
+```text
+M[i,i+1] ::= Matrix(i)
+M[i,j]   ::= Multiply(M[i,k], M[k,j]) for i < k < j
+```
+
+Each `Multiply` also records its split and the local multiplication
+cost. The root derives `A(BC)` and `(AB)C`. Zeno-ADP is a Rust library
+for algebraic dynamic programming (ADP). The grammar generates those
+trees, and an evaluation algebra defines what to compute from them.
+
+| Algebra | Question | Root answer |
+|---|---|---|
+| `Minimum` | How many scalar multiplications does the cheapest tree take? | 4,500 |
+| `Count` | How many derivations are there? | 2 |
+| `Enumerate` | Which trees are there? | `A(BC)`, `(AB)C` |
+
+```rust
+use zeno_adp::algebras::{Cost, Count, Enumerate, Minimum};
+use zeno_adp::grammars::{matrix_chain, MatrixChain};
+use zeno_adp::tabulate;
+
+fn main() -> Result<(), zeno_adp::Error> {
+    let chart = matrix_chain(&[10, 30, 5, 60])?;
+    assert_eq!(tabulate(&chart, &Minimum)?, [Cost::Finite(4_500)]);
+    assert_eq!(tabulate(&chart, &Count)?, [2]);
+    let trees = tabulate(&chart, &Enumerate)?;
+    assert_eq!(trees.len(), 2);
+    assert!(matches!(trees[0].operator, MatrixChain::Multiply { split: 1, .. }));
+    assert!(matches!(trees[1].operator, MatrixChain::Multiply { split: 2, .. }));
+    Ok(())
+}
+```
+
+See the [cell-by-cell answers](docs/QUESTIONS.md#three-questions-one-chart)
+and [the audit on this chart](docs/AUDIT.md#checking-bellmans-principle).
 
 ## Installation
 
@@ -15,32 +48,11 @@ Add the crate to your application's `Cargo.toml`.
 
 ```toml
 [dependencies]
-zeno-adp = "0.8.0"
+zeno-adp = "0.9.0"
 ```
 
-## Find the cheapest matrix parenthesization
-
-The grammar supplies both parenthesizations for matrices A (10×30),
-B (30×5) and C (5×60). Multiplying (AB)C takes 4,500 scalar
-multiplications. A(BC) takes 27,000. The same grammar answers both
-“what is the minimum cost?” and “how many choices are there?”
-
-```rust
-use zeno_adp::algebras::{Cost, Count};
-use zeno_adp::compiled;
-use zeno_adp::grammars::matrix_chain_source;
-
-fn main() -> Result<(), zeno_adp::Error> {
-    let source = matrix_chain_source(&[10, 30, 5, 60])?;
-    let scores = compiled::best(&source)?;
-    let optimum = scores.recover().first_minimum_tree()?;
-    assert_eq!(optimum.map(|answer| answer.value), Some(Cost::Finite(4500)));
-
-    let count = compiled::tabulate(&source, &Count)?;
-    assert_eq!(count.answer(), Some(&2));
-    Ok(())
-}
-```
+Here, ≈DP (read “approximate DP”) means approximate dynamic programming,
+and adaptive dynamic programming is written in full.
 
 ## Exact models
 
@@ -98,8 +110,8 @@ the one-worker median. Answers agreed at every worker count.
 | Nussinov, 700 bases | 1.46× | 2.12× | 2.53× |
 
 [Compiler guide](docs/COMPILER.md) ·
-[Streaming and recovery](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.8.0/docs/FAST.md) ·
-[Forests, crossings and sets](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.8.0/docs/STRUCTURES.md)
+[Streaming and recovery](docs/FAST.md) ·
+[Forests, crossings and sets](docs/STRUCTURES.md)
 
 Build an alignment grammar from two ranked prefix grammars with
 `grammars::PrefixProduct`. For one minimum-cost unit alignment,
@@ -114,7 +126,7 @@ table, as does `first_minimum_tree`. Both rank in ascending score order
 and keep first derivation order for ties. `Count` counts occurrences.
 `Classes` lists distinct keys. `Classified` applies a question per key
 and may return several pairs per key.
-[Ranking contracts](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.8.0/docs/QUESTIONS.md#ranking-trees)
+[Ranking contracts](docs/QUESTIONS.md#ranking-trees)
 
 `ParetoWitnesses` retains every non-dominated derivation in order for two
 fixed additive costs with representable ordered sums. Filter by a resource
@@ -176,19 +188,19 @@ operations on discarded branches and on every cell evaluated.
 Rust's reference table is proved, by exhaustive check, to match that specification on
 1,892 charts covering short folding, alignment, matrix-chain and knapsack
 inputs and a four-cell fixture. The audit guide gives the exact domains
-and five answers compared at each rank. [Audit guide](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.8.0/docs/AUDIT.md#verification-scope)
+and five answers compared at each rank. [Audit guide](docs/AUDIT.md#verification-scope)
 
 Run `cargo run --offline --locked --example matrix_chain` from the checkout.
 Run `cargo run --offline --locked --example cookbook` for 24 recipes
 with direct checks on raw inputs. [Cookbook](docs/COOKBOOK.md) · [Examples](examples/)
 
-[API documentation](https://docs.rs/zeno-adp/0.8.0/zeno_adp/) · [MIT license](https://github.com/TheDarkLightX/Zeno-ADP/blob/v0.8.0/LICENSE)
+[API documentation](https://docs.rs/zeno-adp/0.9.0/zeno_adp/) · [MIT license](LICENSE)
 
-See the changelog for upgrade notes from earlier versions. [Changelog](CHANGELOG.md) · [Release 0.8.0](https://github.com/TheDarkLightX/Zeno-ADP/releases/tag/v0.8.0)
+See the changelog for upgrade notes from earlier versions. [Changelog](CHANGELOG.md)
 
-## Acknowledgements
+## Lineage and acknowledgements
 
 Zeno-ADP builds on algebraic dynamic programming as developed by Robert Giegerich and colleagues at Bielefeld
 University, and on the Bellman's GAP language and compiler. Its design was inspired by Stefanie Schirmer's talk
 ["Dynamic programming at ease — with Grammars, Algebras, Products"](https://www.youtube.com/watch?v=anj_-Z2L4J0)
-(Strange Loop, 2014).
+(Strange Loop, 2014). See the [lineage notes](docs/LINEAGE.md) for the papers and the BOB 2016 talk.
