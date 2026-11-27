@@ -2,7 +2,9 @@ use num_bigint::BigUint;
 use std::{collections::BTreeMap, hint::black_box, time::Instant};
 use zeno_adp::fast::{
     interval_choice::analyze,
-    interval_cover::{solve, solve_range, solve_with_sparse_limit, Interval, Optimum, Pin},
+    interval_cover::{
+        solve, solve_chart, solve_range, solve_with_sparse_limit, Interval, Optimum, Pin,
+    },
 };
 
 fn fixture(n: usize, mixed: bool) -> Vec<Interval> {
@@ -176,9 +178,64 @@ fn grid() {
     }
 }
 
+const SOURCE_MENUS: [(&str, &str); 2] = [
+    (
+        "tarfile",
+        include_str!("support/interval_cover/tarfile.txt"),
+    ),
+    (
+        "zipfile",
+        include_str!("support/interval_cover/zipfile.txt"),
+    ),
+];
+
+fn source_menu(data: &str) -> (usize, Vec<Interval>) {
+    let mut lines = data.lines().filter(|line| !line.starts_with('#'));
+    let points = lines.next().unwrap().parse().unwrap();
+    let rows = lines
+        .map(|line| {
+            let (start, rest) = line.split_once(' ').unwrap();
+            let (end, cost) = rest.split_once(' ').unwrap();
+            Interval {
+                start: start.parse().unwrap(),
+                end: end.parse().unwrap(),
+                cost: cost.parse().unwrap(),
+            }
+        })
+        .collect();
+    (points, rows)
+}
+
+fn source_bench() {
+    println!("source,points,rows,reps,min_cost,count,chart_ms,default_chart_ms,chart_ratio,rolled_ms,default_rolled_ms,rolled_ratio");
+    for (name, data) in SOURCE_MENUS {
+        let (n, rows) = source_menu(data);
+        let fast = || solve(n, &rows, &[]).unwrap();
+        let chart = || solve_chart(n, &rows, &[]).unwrap();
+        let baseline = || rolled(n, &rows);
+        let answer = fast();
+        assert_eq!(answer, chart());
+        assert_eq!(answer, baseline());
+        let score = answer.unwrap();
+        let (c, fc) = paired(chart, fast, 9);
+        let (r, fr) = paired(baseline, fast, 9);
+        println!(
+            "{name},{n},{},9,{},{},{c:.6},{fc:.6},{:.4},{r:.6},{fr:.6},{:.4}",
+            rows.len(),
+            score.cost,
+            score.count,
+            c / fc,
+            r / fr
+        );
+    }
+}
+
 fn main() {
-    if std::env::args().nth(1).as_deref() == Some("--grid") {
-        return grid();
+    match std::env::args().nth(1).as_deref() {
+        None => {}
+        Some("--grid") => return grid(),
+        Some("--real") => return source_bench(),
+        _ => panic!("expected --grid, --real or no argument"),
     }
     println!("task,shape,points,rows,repetitions,baseline_ms,new_ms,ratio");
     for (mixed, name) in [(false, "independent-free"), (true, "overlap-mixed")] {
@@ -225,6 +282,24 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn archived_source_menus_have_exact_costs_and_counts() {
+        for ((_, menu), (points, row_count, cost, count)) in SOURCE_MENUS
+            .into_iter()
+            .zip([(96, 174, 529, 1u8), (78, 146, 370, 6u8)])
+        {
+            let (n, rows) = source_menu(menu);
+            assert_eq!((n, rows.len()), (points, row_count));
+            let expected = Some(Optimum {
+                cost,
+                count: count.into(),
+            });
+            assert_eq!(rolled(n, &rows), expected);
+            assert_eq!(solve(n, &rows, &[]).unwrap(), expected);
+            assert_eq!(solve_chart(n, &rows, &[]).unwrap(), expected);
+        }
+    }
 
     #[test]
     fn crossover_grid_includes_both_packet_menus() {
