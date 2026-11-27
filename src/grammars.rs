@@ -111,6 +111,15 @@ fn complementary(left: u8, right: u8) -> bool {
 
 /// Nussinov pair maximization with Watson–Crick pairs and a caller-selected
 /// minimum number of intervening bases. Each rule classifies the leftmost base.
+///
+/// ```text
+/// F[i,i] ::= Empty
+/// F[i,j] ::= Unpaired(i, F[i+1,j])                     if i < j
+///          | Pair(i, k, F[i+1,k], F[k+1,j])             if i < k < j,
+///              k-i-1 >= min_loop, and sequence[i] pairs with sequence[k].
+/// ```
+/// All empty spans share one cell. The root spans the whole sequence.
+// Derivation check: tests/grammar_comments.rs::nussinov_derivations.
 pub fn nussinov(sequence: &[u8], min_loop: usize) -> Result<Chart<Fold>, Error> {
     ChartBuilder::build(nussinov_source(sequence, min_loop)?)
 }
@@ -249,6 +258,15 @@ impl ScoredOperator for Align {
 
 /// Global alignment with unit mismatch and gap costs. Each rule extends a
 /// prefix alignment by one column. Adjacent gaps on opposite sides are allowed.
+///
+/// ```text
+/// A[0,0] ::= Start
+/// A[i,j] ::= Diagonal(left[i-1], right[j-1], A[i-1,j-1])   if i,j > 0
+///          | Left(left[i-1], A[i-1,j])                    if i > 0
+///          | Right(right[j-1], A[i,j-1])                  if j > 0
+/// ```
+/// The root combines the two full prefixes.
+// Derivation check: tests/grammar_comments.rs::alignment_derivations.
 pub fn alignment(left: &[u8], right: &[u8]) -> Result<Chart<Align>, Error> {
     ChartBuilder::build(alignment_source(left, right)?)
 }
@@ -395,6 +413,16 @@ impl ScoredOperator for LocalAlign {
 
 /// Local alignment with one empty candidate and all nonempty column paths
 /// over any two substrings. Opposing adjacent gaps are allowed.
+///
+/// ```text
+/// S[i,j] ::= Start(i, j)
+/// P[i,j] ::= Column(c, S[p,q]) | Column(c, P[p,q])
+/// Root   ::= Empty | End(P[i,j]) for every endpoint (i,j) in prefix order
+/// ```
+/// For each endpoint, `(c,p,q)` uses the diagonal, left, and right cases
+/// of [the global grammar](alignment), in that order. Each column first
+/// extends a start and then a nonempty path.
+// Derivation check: tests/grammar_comments.rs::local_alignment_derivations.
 pub fn local_alignment(left: &[u8], right: &[u8]) -> Result<Chart<LocalAlign>, Error> {
     ChartBuilder::build(local_alignment_source(left, right)?)
 }
@@ -534,6 +562,14 @@ impl ScoredOperator for MatrixChain {
 
 /// All parenthesizations of a matrix chain. Adjacent dimensions describe
 /// one matrix. Each split pays the number of scalar multiplications.
+///
+/// ```text
+/// M[i,i+1] ::= Matrix(i)
+/// M[i,j]   ::= Multiply(i, k, j, d[i]*d[k]*d[j], M[i,k], M[k,j])
+///                for i < k < j in increasing order
+/// ```
+/// The root spans all matrices, and `d` is the input dimension vector.
+// Derivation check: tests/grammar_comments.rs::matrix_chain_derivations.
 pub fn matrix_chain(dimensions: &[u32]) -> Result<Chart<MatrixChain>, Error> {
     ChartBuilder::build(matrix_chain_source(dimensions)?)
 }
@@ -662,6 +698,14 @@ impl ScoredOperator for Knapsack {
 
 /// All subsets satisfying a capacity in 0/1 knapsack. The score is the
 /// negated sum of selected values. Identical items are distinct by index.
+///
+/// ```text
+/// K[0,c]   ::= Empty
+/// K[i+1,c] ::= Skip(i, K[i,c])
+///            | Pick(i, value[i], K[i,c-weight[i]])    if weight[i] <= c
+/// ```
+/// The root uses all items and the requested capacity.
+// Derivation check: tests/grammar_comments.rs::knapsack_derivations.
 pub fn knapsack(items: &[Item], capacity: usize) -> Result<Chart<Knapsack>, Error> {
     ChartBuilder::build(knapsack_source(items, capacity)?)
 }

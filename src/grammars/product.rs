@@ -15,6 +15,12 @@ impl<T: Clone> Operator for Prefix<T> {
 }
 
 /// One ranked cell per prefix, with a single derivation for each prefix.
+///
+/// ```text
+/// P[0]   ::= Start
+/// P[i+1] ::= Token(input[i], P[i])
+/// ```
+// Derivation check: tests/grammar_comments.rs::sequence_prefix_derivations.
 pub fn sequence_prefixes<T: Clone>(input: &[T]) -> Result<Chart<Prefix<T>>, Error> {
     let size = input.len().checked_add(1).ok_or(Error::Overflow)?;
     let mut cells = reserve_table(size)?;
@@ -59,6 +65,17 @@ pub struct PrefixProduct<'a, L, R> {
 }
 
 impl<'a, L: Operator, R: Operator> PrefixProduct<'a, L, R> {
+    /// Bind the product grammar to two nullary/unary charts.
+    ///
+    /// ```text
+    /// P[i,j] ::= Start(l,r)          for L[i] ::= l and R[j] ::= r
+    ///          | Both(l,r,P[a,b])    for L[i] ::= l(L[a]) and R[j] ::= r(R[b])
+    ///          | Left(l,P[a,j])     for L[i] ::= l(L[a])
+    ///          | Right(r,P[i,b])    for R[j] ::= r(R[b])
+    /// ```
+    /// Visit pairs of operand occurrences first, then left-only and right-only
+    /// occurrences. The root pairs the two operand roots.
+    // Derivation check: tests/grammar_product.rs::product_retains_duplicate_leaves_gaps_and_nonfinal_roots.
     pub fn new(left: &'a Chart<L>, right: &'a Chart<R>) -> Result<Self, Error> {
         check_operand(left, "left product operand")?;
         check_operand(right, "right product operand")?;

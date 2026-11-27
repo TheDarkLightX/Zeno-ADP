@@ -140,12 +140,23 @@ fn product_retains_duplicate_leaves_gaps_and_nonfinal_roots() {
         vec![],
         vec![(Right(y), vec![6]), (Right(z), vec![7])],
     ];
-    for (rules, expected) in chart.cells().iter().zip(emissions) {
-        assert!(rules
-            .iter()
-            .map(|rule| (&rule.operator, &rule.children))
-            .eq(expected.iter().map(|(op, children)| (op, children))));
-    }
+    let grammar = Chart::new(
+        emissions
+            .map(|rules| {
+                rules
+                    .into_iter()
+                    .map(|(op, children)| Rule::new(op, children))
+                    .collect()
+            })
+            .into(),
+        5,
+    )
+    .unwrap();
+    assert_eq!(chart, grammar);
+    assert_eq!(
+        tabulate_cells(&chart, &Enumerate).unwrap(),
+        tabulate_cells(&grammar, &Enumerate).unwrap()
+    );
     let reference = tabulate_cells(&chart, &Count).unwrap();
     let streamed = fast::tabulate(&product, &Count).unwrap();
     assert_eq!(streamed.root(), 5);
