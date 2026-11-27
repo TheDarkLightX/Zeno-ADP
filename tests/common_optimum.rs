@@ -298,7 +298,7 @@ fn a_retained_lookup_needs_no_budget_and_an_unlisted_one_is_declined() {
     let optima = Optima::of(&chart, models).unwrap();
     let masks = WinnerMasks::of(&chart, &optima).unwrap();
     let pair = ModelSet::new([0, 2], models).unwrap();
-    let (table, _) = AnswerTable::build(&masks, &chart, &[pair.clone()]).unwrap();
+    let (table, _) = AnswerTable::build(&masks, &chart, std::slice::from_ref(&pair)).unwrap();
     let exact = common(&chart, models, &pair).unwrap().into_inner();
     assert_eq!(table.get(&pair), Some(exact.count()));
     let unlisted = ModelSet::new([0, 1, 3], models).unwrap();

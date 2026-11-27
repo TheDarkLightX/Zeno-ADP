@@ -434,14 +434,14 @@ impl RawModel {
         for state in order {
             let word = access[state].as_deref().expect("visited");
             let here = access_scores[state];
-            for symbol in 0..observer.symbols {
+            for (symbol, gain) in gains[state].iter_mut().enumerate() {
                 let longer = extended_word(word, symbol)?;
                 let score = scorer(&longer);
                 let target = observer.next[state][symbol];
                 if access[target].as_deref() == Some(longer.as_slice()) {
                     access_scores[target] = score;
                 }
-                gains[state][symbol] = score.checked_sub(here).ok_or(Error::Overflow)?;
+                *gain = score.checked_sub(here).ok_or(Error::Overflow)?;
                 known.push((longer, score));
             }
         }

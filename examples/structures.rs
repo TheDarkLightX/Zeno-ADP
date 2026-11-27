@@ -43,7 +43,7 @@ fn crossing_grammar() -> Result<Grammar<Crossing>, Error> {
         ]],
         operator: Box::new(|_| Crossing::Interleave),
     }];
-    for byte in [b'a', b'b'] {
+    for &byte in b"ab" {
         rules.push(Production {
             name: char::from(byte).to_string(),
             parent: 1,

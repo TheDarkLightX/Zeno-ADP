@@ -53,7 +53,7 @@ fn binary_words(max: usize) -> Vec<Vec<u8>> {
     for _ in 0..max {
         let mut next = Vec::new();
         for word in &level {
-            for bit in [b'0', b'1'] {
+            for &bit in b"01" {
                 let mut longer: Vec<u8> = word.clone();
                 longer.push(bit);
                 next.push(longer);

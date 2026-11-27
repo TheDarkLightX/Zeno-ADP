@@ -426,9 +426,9 @@ fn minimum_yields<O, const TRACKS: usize, T, A: TrackAtom<T>>(
     loop {
         let mut changed = false;
         for rule in productions {
-            for track in 0..TRACKS {
+            for (track, atoms) in rule.tracks.iter().enumerate() {
                 let mut length = Finite(0);
-                for atom in &rule.tracks[track] {
+                for atom in atoms {
                     let width = match atom.child() {
                         Some(index) => yields[rule.children[index]][track],
                         None => Finite(1),
@@ -480,9 +480,9 @@ fn positive_yields<O, const TRACKS: usize, T, A: TrackAtom<T>>(
             {
                 continue;
             }
-            for track in 0..TRACKS {
+            for (track, atoms) in rule.tracks.iter().enumerate() {
                 if !positive[rule.parent][track]
-                    && rule.tracks[track].iter().any(|atom| {
+                    && atoms.iter().any(|atom| {
                         atom.child()
                             .is_none_or(|index| positive[rule.children[index]][track])
                     })

@@ -158,11 +158,11 @@ fn grid() {
                 for mode in 1..4 {
                     assert_eq!(run(mode), expected);
                 }
-                let mut samples = [[0.0; 9]; 4];
+                let mut samples: [_; 4] = std::array::from_fn(|_| Vec::with_capacity(9));
                 for rep in 0..9 {
                     for slot in 0..4 {
                         let mode = (slot + rep) % 4;
-                        samples[mode][rep] = elapsed(|| run(mode));
+                        samples[mode].push(elapsed(|| run(mode)));
                     }
                 }
                 let [rolled, sparse, range, default] = samples.map(|mut times| {

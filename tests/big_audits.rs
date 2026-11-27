@@ -143,7 +143,10 @@ fn widened_weights_and_results_pass_reference_audits() {
         audit_bounded(&chart, &max, BUDGET, AnswerOrder::Ordered).unwrap(),
     ] {
         assert!(report.bellman.first_failure.is_none());
-        assert_eq!(report.bellman.tabulated, [expected.clone()]);
+        assert_eq!(
+            report.bellman.tabulated.as_slice(),
+            std::slice::from_ref(&expected)
+        );
     }
     assert!(BigRational::new(1u8.into(), BigUint::ZERO).is_none());
     assert_eq!(
