@@ -27,6 +27,7 @@ pub mod queries;
 pub mod robust_prefix;
 pub mod sets;
 pub mod state_discovery;
+pub mod windows;
 
 pub use audit::{
     audit, audit_bounded, audit_bounded_classified, grammar_growth, Ambiguity, AnswerOrder, Audit,
@@ -95,6 +96,11 @@ pub enum Error {
         reason: &'static str,
     },
     InfinityDisabled,
+    /// A productive constructor's floor exceeds the declared score window.
+    FloorOutsideWindow {
+        floor: u64,
+        max_floor: u64,
+    },
     AuditBudgetExceeded {
         cell: Cell,
         max_tree_nodes: usize,
@@ -143,6 +149,9 @@ impl std::fmt::Display for Error {
                 write!(f, "cannot compile grammar declaration {name}: {reason}")
             }
             Self::InfinityDisabled => write!(f, "this algebra requires finite costs"),
+            Self::FloorOutsideWindow { floor, max_floor } => {
+                write!(f, "floor {floor} exceeds the declared maximum {max_floor}")
+            }
             Self::AuditBudgetExceeded {
                 cell,
                 max_tree_nodes,

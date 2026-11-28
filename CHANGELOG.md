@@ -2,6 +2,12 @@
 
 ## 0.9.0 (unreleased)
 
+- Find the score closest to a target with `windows::ClosestTo` or check
+  whether the minimum occurs once under bounded floors with
+  `windows::UniqueMinimum`. Their `tabulate_cells` methods check attainable
+  scores for overflow before pruning. An out-of-window floor on a
+  productive rule returns `Error::FloorOutsideWindow`.
+
 - Find the minimum cost and exact number of labelled interval covers, including
   under required and excluded rows. The sparse frontier promotes to a range
   tree at a measured width, with an explicit caller override.
