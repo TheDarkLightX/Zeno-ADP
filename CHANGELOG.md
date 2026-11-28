@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.9.0 (unreleased)
+## 0.9.0
 
 - Find the score closest to a target with `windows::ClosestTo` or check
   whether the minimum occurs once under bounded floors with
